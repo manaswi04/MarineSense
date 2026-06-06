@@ -1,0 +1,49 @@
+[
+  {
+    "beach": "Versova Beach",
+    "species": [
+      "Indian Mackerel",
+      "Blue Swimmer Crab",
+      "Silver Pomfret",
+      "Moon Jellyfish"
+    ],
+    "biodiversityScore": 82,
+    "riskLevel": "Medium"
+  },
+
+  {
+    "beach": "Aksa Beach",
+    "species": [
+      "Zooplankton",
+      "Penaeid Shrimp",
+      "Mud Crab",
+      "Anchovy"
+    ],
+    "biodiversityScore": 91,
+    "riskLevel": "Low"
+  },
+
+  {
+    "beach": "Girgaon Chowpatty",
+    "species": [
+      "Catfish",
+      "Marine Snails",
+      "Plankton",
+      "Bombay Duck"
+    ],
+    "biodiversityScore": 63,
+    "riskLevel": "High"
+  },
+
+  {
+    "beach": "Manori Beach",
+    "species": [
+      "Sea Bass",
+      "Prawns",
+      "Molluscs",
+      "Crustaceans"
+    ],
+    "biodiversityScore": 88,
+    "riskLevel": "Low"
+  }
+]

@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MarineSense – AI-Powered Ocean Intelligence</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="gradient-bg min-h-screen text-white">
+
+  <!-- Layout Wrapper -->
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-64 flex-shrink-0 glass-effect border-r border-cyan-900/30 flex flex-col">
+      <div class="p-6 border-b border-cyan-900/30">
+        <h1 class="text-xl font-bold text-white" id="system-title">MarineSense</h1>
+        <p class="text-xs text-cyan-400 mt-1" id="tagline">AI-Powered Ocean Intelligence</p>
+      </div>
+
+      <nav class="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-thin">
+        <a href="#" class="nav-link nav-item active flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white" data-page="dashboard">
+          <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+          </svg>
+          Dashboard
+        </a>
+        <a href="#" class="nav-link nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-gray-400 hover:text-white" data-page="biodiversity">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+          Biodiversity
+        </a>
+        <a href="#" class="nav-link nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-gray-400 hover:text-white" data-page="risk">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          Risk Analysis
+        </a>
+        <a href="#" class="nav-link nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-gray-400 hover:text-white" data-page="advisory">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Advisory Reports
+        </a>
+        <a href="#" class="nav-link nav-item flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-gray-400 hover:text-white" data-page="datasources">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+          </svg>
+          Data Sources
+        </a>
+      </nav>
+
+      <!-- Sidebar Footer -->
+      <div class="p-4 border-t border-cyan-900/30">
+        <div class="flex items-center gap-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+          <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+          <span class="text-xs text-emerald-400">All Systems Operational</span>
+        </div>
+      </div>
+    </aside>
+<!-- Main Content Area -->
+<div class="flex-1 flex flex-col overflow-hidden">
+
+  <!-- Top Bar -->
+  <header
+    class="glass-effect border-b border-cyan-900/30 px-6 py-4 flex items-center justify-between flex-shrink-0 relative"
+    style="z-index:10000;"
+  >
+
+    <div class="flex items-center gap-4">
+
+      <h2
+        class="text-lg font-semibold text-white"
+        id="page-title"
+      >
+        Ocean Analytics Dashboard
+      </h2>
+
+      <div class="relative">
+
+        <input
+          type="text"
+          id="search-input"
+          placeholder="Search metrics, alerts..."
+          class="w-64 px-4 py-2 rounded-xl glass-effect text-sm text-gray-300 placeholder-gray-500 border border-cyan-900/30 focus:outline-none focus:border-cyan-500/50"
+        />
+
+        <div
+          id="search-results"
+          class="hidden absolute top-full left-0 w-80 mt-1 glass-effect rounded-xl border border-cyan-900/30 max-h-80 overflow-y-auto scrollbar-thin shadow-xl"
+          style="z-index:99999;"
+        ></div>
+
+      </div>
+
+    </div>
+
+    <!-- Right Controls -->
+    <div class="flex items-center gap-3">
+
+      <!-- CITY DROPDOWN -->
+      <select
+        id="location-select"
+        class="text-sm text-white bg-[#0c1929] px-3 py-2 rounded-xl border border-cyan-900/30 focus:outline-none focus:ring-2 focus:ring-cyan-500 cursor-pointer"
+      >
+        <option value="mumbai">Mumbai Port</option>
+        <option value="goa">Mormugao (Goa)</option>
+        <option value="kochi">Kochi Port</option>
+        <option value="chennai">Chennai Port</option>
+        <option value="vizag">Visakhapatnam Port</option>
+        <option value="kolkata">Kolkata Port</option>
+        <option value="portblair">Port Blair</option>
+      </select>
+
+      <!-- CLOCK -->
+      <div
+        id="live-clock"
+        class="text-sm text-cyan-400 font-mono bg-white/5 px-4 py-2 rounded-xl border border-cyan-900/30"
+      >
+        00:00:00
+      </div>
+
+      <!-- Notification Button -->
+      <button
+        id="notification-btn"
+        class="relative p-2 rounded-xl glass-effect border border-cyan-900/30 hover:border-cyan-500/50 transition-colors"
+      >
+
+        <svg
+          class="w-5 h-5 text-gray-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+          />
+        </svg>
+
+        <span
+          class="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500"
+        ></span>
+
+      </button>
+
+      <!-- Profile Button -->
+      <div
+        class="relative"
+        style="z-index:99999;"
+      >
+
+        <button
+          id="profile-btn"
+          class="flex items-center gap-2 p-2 rounded-xl glass-effect border border-cyan-900/30 hover:border-cyan-500/50 transition-colors"
+        >
+
+          <div
+            class="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center text-xs font-bold"
+          >
+            MS
+          </div>
+
+          <span
+          id="username"
+          class="text-sm text-gray-300"
+          >
+          Admin
+          </span>
+
+          <svg
+            class="w-4 h-4 text-gray-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+
+        </button>
+
+        <!-- Profile Dropdown -->
+<div
+  id="profile-menu"
+  class="hidden absolute right-0 top-full mt-3 w-72 rounded-2xl overflow-hidden"
+  style="
+    z-index:999999;
+    background:#08111f;
+    border:1px solid rgba(6,182,212,0.25);
+    backdrop-filter:blur(20px);
+    box-shadow:
+      0 0 25px rgba(6,182,212,0.15),
+      0 15px 35px rgba(0,0,0,0.45);
+  "
+>
+
+  <!-- User Info -->
+  <div class="px-5 py-4 border-b border-slate-700">
+
+    <div class="flex items-center gap-3">
+
+      <div
+        class="w-11 h-11 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center text-white font-bold"
+      >
+        MS
+      </div>
+
+      <div>
+
+        <h4 class="text-white font-semibold">
+          Manaswi Bhosale
+        </h4>
+
+        <p class="text-xs text-gray-400">
+          MarineSense Administrator
+        </p>
+
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Menu Options -->
+  <div class="py-2">
+
+    <a
+      href="#"
+      onclick="openProfile()"
+      class="
+        flex items-center gap-3
+        px-5 py-3
+        text-gray-200
+        hover:bg-cyan-500/10
+        hover:text-cyan-400
+        transition-all
+      "
+    >
+      <span class="text-lg">⚙️</span>
+      <span>Profile Settings</span>
+    </a>
+
+    <a
+      href="#"
+      onclick="openPreferences()"
+      class="
+        flex items-center gap-3
+        px-5 py-3
+        text-gray-200
+        hover:bg-cyan-500/10
+        hover:text-cyan-400
+        transition-all
+      "
+    >
+      <span class="text-lg">🎨</span>
+      <span>Preferences</span>
+    </a>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="border-t border-slate-700 p-2">
+
+    <a
+      href="#"
+      onclick="logout()"
+      class="
+        flex items-center gap-3
+        px-4 py-3
+        rounded-xl
+        text-red-400
+        hover:bg-red-500/10
+        hover:text-red-300
+        transition-all
+      "
+    >
+      <span class="text-lg">🚪</span>
+      <span>Sign Out</span>
+    </a>
+
+  </div>
+
+  </div>
+
+</div>
+
+  </header>
+
+  <!-- Page Content -->
+  <main class="flex-1 overflow-y-auto scrollbar-thin p-6">
+
+        <!-- ===== DASHBOARD PAGE ===== -->
+<div id="dashboard-page" class="page-content">
+
+  <!-- Metric Cards -->
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+
+    <!-- Temperature -->
+    <div class="glow-card glass-effect rounded-2xl p-5">
+      <p class="text-xs text-gray-400 uppercase mb-1">
+        Sea Temperature
+      </p>
+
+      <p id="temp-value"
+        class="text-3xl font-bold text-cyan-400">
+        --
+      </p>
+
+      <p class="text-xs text-gray-500 mt-2">
+        OpenMeteo
+      </p>
+    </div>
+
+    <!-- Salinity -->
+    <div class="glow-card glass-effect rounded-2xl p-5">
+      <p class="text-xs text-gray-400 uppercase mb-1">
+        Salinity
+      </p>
+
+      <p id="salinity-value"
+        class="text-3xl font-bold text-blue-400">
+        --
+      </p>
+
+      <p class="text-xs text-gray-500 mt-2">
+        Copernicus
+      </p>
+    </div>
+
+    <!-- Oxygen -->
+    <div class="glow-card glass-effect rounded-2xl p-5">
+      <p class="text-xs text-gray-400 uppercase mb-1">
+        Oxygen
+      </p>
+
+      <p id="oxygen-value"
+        class="text-3xl font-bold text-emerald-400">
+        --
+      </p>
+
+      <p class="text-xs text-gray-500 mt-2">
+        Copernicus
+      </p>
+    </div>
+
+    <!-- Risk -->
+    <div class="glow-card glass-effect rounded-2xl p-5">
+      <p class="text-xs text-gray-400 uppercase mb-1">
+        Risk Level
+      </p>
+
+      <p id="risk-level"
+        class="text-3xl font-bold text-yellow-400">
+        --
+      </p>
+
+      <p class="text-xs text-gray-500 mt-2">
+        AI Risk Engine
+      </p>
+    </div>
+
+    <!-- Sea Level -->
+    <div class="glow-card glass-effect rounded-2xl p-5">
+      <p class="text-xs text-gray-400 uppercase mb-1">
+        Sea Level
+      </p>
+
+      <p id="sea-level"
+        class="text-3xl font-bold text-cyan-400">
+        --
+      </p>
+
+      <p class="text-xs text-gray-500 mt-2">
+        Copernicus ZOS
+      </p>
+    </div>
+
+  </div>
+
+  <!-- Last Updated -->
+  <div class="mb-4 flex justify-end">
+    <div id="update-time"
+      class="text-xs text-cyan-400 bg-white/5 px-4 py-2 rounded-xl border border-cyan-900/30">
+      Waiting for data...
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+
+    <!-- Temperature Chart -->
+    <div class="glass-effect rounded-2xl p-5">
+
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-sm font-semibold text-white">
+          Temperature vs Time
+        </h3>
+
+        <span class="text-xs text-cyan-400">
+          Mumbai Port
+        </span>
+      </div>
+
+      <div class="h-56">
+        <canvas id="tempChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Salinity Chart -->
+    <div class="glass-effect rounded-2xl p-5">
+
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-sm font-semibold text-white">
+          Salinity vs Time
+        </h3>
+
+        <span class="text-xs text-blue-400">
+          Copernicus SOB
+        </span>
+      </div>
+
+      <div class="h-56">
+        <canvas id="salinityChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Oxygen Chart -->
+    <div class="glass-effect rounded-2xl p-5">
+
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-sm font-semibold text-white">
+          Oxygen vs Time
+        </h3>
+
+        <span class="text-xs text-emerald-400">
+          Marine Model
+        </span>
+      </div>
+
+      <div class="h-56">
+        <canvas id="oxygenChart"></canvas>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Row -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+    <!-- Advisory Zones -->
+    <div class="space-y-4">
+
+  <div class="flex justify-between items-center">
+    <span class="text-gray-400">
+      Wave Height
+    </span>
+
+    <span id="wave-height"
+      class="text-cyan-400 font-semibold">
+      --
+    </span>
+  </div>
+
+  <div class="w-full bg-white/5 rounded-full h-2">
+    <div id="wave-bar"
+      class="bg-cyan-400 h-2 rounded-full"
+      style="width:0%">
+    </div>
+  </div>
+
+  <div class="flex justify-between items-center">
+    <span class="text-gray-400">
+      Wind Speed
+    </span>
+
+    <span id="wind-speed"
+      class="text-yellow-400 font-semibold">
+      --
+    </span>
+  </div>
+
+  <div class="w-full bg-white/5 rounded-full h-2">
+    <div id="wind-bar"
+      class="bg-yellow-400 h-2 rounded-full"
+      style="width:0%">
+    </div>
+  </div>
+
+  <div class="flex justify-between items-center">
+    <span class="text-gray-400">
+      Entry Status
+    </span>
+
+    <span id="advisory-status"
+      class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-sm">
+      SAFE
+    </span>
+  </div>
+
+</div>
+
+    <!-- Clustering -->
+    <div id="cluster-container"
+  class="space-y-3">
+
+  <!-- Dynamic zones -->
+
+</div>
+    <!-- Risk Meter -->
+    <div class="glass-effect rounded-2xl p-5">
+
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-sm font-semibold text-white">
+          Overall Risk Score
+        </h3>
+
+        <span class="text-xs text-red-400">
+          Live AI
+        </span>
+      </div>
+
+      <div class="flex flex-col items-center">
+
+        <div class="relative w-44 h-44">
+
+          <svg class="w-full h-full transform -rotate-90"
+            viewBox="0 0 160 160">
+
+            <circle
+              cx="80"
+              cy="80"
+              r="70"
+              fill="none"
+              stroke="rgba(255,255,255,0.05)"
+              stroke-width="12"
+            />
+
+            <defs>
+              <linearGradient id="riskGradient">
+
+                <stop offset="0%" stop-color="#10b981" />
+                <stop offset="50%" stop-color="#fbbf24" />
+                <stop offset="100%" stop-color="#ef4444" />
+
+              </linearGradient>
+            </defs>
+
+            <circle
+              id="risk-progress"
+              cx="80"
+              cy="80"
+              r="70"
+              fill="none"
+              stroke="url(#riskGradient)"
+              stroke-width="12"
+              stroke-linecap="round"
+              stroke-dasharray="440"
+              stroke-dashoffset="440"
+            />
+
+          </svg>
+
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+
+            <span id="riskScore"
+              class="text-4xl font-bold text-white">
+              0
+            </span>
+
+            <span id="risk-label"
+              class="text-xs text-yellow-400 mt-1">
+              LOW
+            </span>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+  
+</div>
+
+
+<!-- =========================================
+🌿 BIODIVERSITY PAGE
+========================================= -->
+<div id="biodiversity-page"
+  class="page-content hidden">
+
+  <!-- Header -->
+  <div class="
+    flex flex-col lg:flex-row
+    lg:items-center
+    lg:justify-between
+    gap-4 mb-6
+  ">
+
+    <div>
+
+      <h2 class="
+        text-3xl font-bold text-white
+      ">
+        Mumbai Coastal Biodiversity
+      </h2>
+
+      <p class="
+        text-gray-400 mt-2
+      ">
+        Real marine species observations from Mumbai coastal ecosystem
+      </p>
+
+    </div>
+
+    <div class="
+      px-4 py-2 rounded-xl
+      bg-cyan-500/10
+      border border-cyan-500/20
+      text-cyan-400 text-sm
+      w-fit
+    ">
+      🌊 OBIS Live Marine Dataset
+    </div>
+
+  </div>
+
+  <!-- Metrics -->
+  <div class="
+    grid grid-cols-1 md:grid-cols-3
+    gap-4 mb-6
+  ">
+
+    <!-- Beaches -->
+    <div class="
+      glass-effect rounded-2xl p-5
+    ">
+
+      <p class="text-gray-400 text-sm">
+        Coastal Regions
+      </p>
+
+      <h3 id="total-beaches"
+        class="
+          text-4xl font-bold
+          text-cyan-400 mt-2
+        ">
+        --
+      </h3>
+
+    </div>
+
+    <!-- Species -->
+    <div class="
+      glass-effect rounded-2xl p-5
+    ">
+
+      <p class="text-gray-400 text-sm">
+        Marine Species
+      </p>
+
+      <h3 id="total-species"
+        class="
+          text-4xl font-bold
+          text-emerald-400 mt-2
+        ">
+        --
+      </h3>
+
+    </div>
+
+    <!-- Avg Score -->
+    <div class="
+      glass-effect rounded-2xl p-5
+    ">
+
+      <p class="text-gray-400 text-sm">
+        Avg Biodiversity Score
+      </p>
+
+      <h3 id="avg-score"
+        class="
+          text-4xl font-bold
+          text-yellow-400 mt-2
+        ">
+        --
+      </h3>
+
+    </div>
+
+  </div>
+
+  <!-- Charts -->
+  <div class="
+    grid grid-cols-1 lg:grid-cols-2
+    gap-4 mb-6
+  ">
+
+    <!-- Biodiversity Chart -->
+    <div class="
+      glass-effect rounded-2xl p-5
+    ">
+
+      <h3 class="
+        text-white font-semibold mb-4
+      ">
+        Biodiversity Score by Beach
+      </h3>
+
+      <div class="h-72">
+
+        <canvas id="biodiversityChart"></canvas>
+
+      </div>
+
+    </div>
+
+    <!-- Species Distribution -->
+    <div class="
+      glass-effect rounded-2xl p-5
+    ">
+
+      <h3 class="
+        text-white font-semibold mb-4
+      ">
+        Species Distribution
+      </h3>
+
+      <div class="h-72">
+
+        <canvas id="speciesChart"></canvas>
+
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Beach Cards -->
+  <div>
+
+    <div class="
+      flex justify-between items-center
+      mb-4
+    ">
+
+      <h3 class="
+        text-xl font-bold text-white
+      ">
+        Biodiversity Hotspots
+      </h3>
+
+    </div>
+
+    <div id="beach-cards"
+      class="
+        grid grid-cols-1
+        md:grid-cols-2
+        xl:grid-cols-3
+        gap-4
+      ">
+
+    </div>
+
+  </div>
+
+</div>
+
+<!-- =========================================
+⚠️ RISK ANALYSIS PAGE
+========================================= -->
+<div id="risk-page"
+     class="page-content hidden">
+
+  <div class="space-y-6">
+
+    <!-- =========================================
+    🔹 TOP METRICS
+    ========================================= -->
+    <div class="
+      grid grid-cols-1
+      md:grid-cols-2
+      xl:grid-cols-4
+      gap-4
+    ">
+
+      <!-- Critical Zones -->
+      <div class="
+        glass-effect rounded-2xl p-5
+      ">
+
+        <p class="
+          text-xs text-gray-500
+          uppercase mb-2
+        ">
+          Critical Zones
+        </p>
+
+        <p id="critical-zones"
+           class="
+             text-3xl font-bold
+             text-red-400
+           ">
+           --
+        </p>
+
+        <div class="
+          mt-3 h-1 bg-white/10
+          rounded-full overflow-hidden
+        ">
+
+          <div id="critical-bar"
+               class="
+                 h-full bg-red-500
+                 rounded-full
+               "
+               style="width:0%">
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- High Risk Events -->
+      <div class="
+        glass-effect rounded-2xl p-5
+      ">
+
+        <p class="
+          text-xs text-gray-500
+          uppercase mb-2
+        ">
+          High Risk Events
+        </p>
+
+        <p id="high-risk-events"
+           class="
+             text-3xl font-bold
+             text-orange-400
+           ">
+           --
+        </p>
+
+        <div class="
+          mt-3 h-1 bg-white/10
+          rounded-full overflow-hidden
+        ">
+
+          <div id="events-bar"
+               class="
+                 h-full bg-orange-500
+                 rounded-full
+               "
+               style="width:0%">
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Avg Risk Score -->
+      <div class="
+        glass-effect rounded-2xl p-5
+      ">
+
+        <p class="
+          text-xs text-gray-500
+          uppercase mb-2
+        ">
+          Avg Risk Score
+        </p>
+
+        <p id="risk-score-avg"
+           class="
+             text-3xl font-bold
+             text-yellow-400
+           ">
+           --
+        </p>
+
+        <div class="
+          mt-3 h-1 bg-white/10
+          rounded-full overflow-hidden
+        ">
+
+          <div id="risk-score-bar"
+               class="
+                 h-full bg-yellow-500
+                 rounded-full
+               "
+               style="width:0%">
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Trend -->
+      <div class="
+        glass-effect rounded-2xl p-5
+      ">
+
+        <p class="
+          text-xs text-gray-500
+          uppercase mb-2
+        ">
+          Trend
+        </p>
+
+        <p id="risk-trend"
+           class="
+             text-3xl font-bold
+             text-cyan-400
+           ">
+           --
+        </p>
+
+        <p id="trend-status"
+           class="
+             text-xs text-emerald-400
+             mt-2
+           ">
+           Live Analysis
+        </p>
+
+      </div>
+
+    </div>
+
+    <!-- =========================================
+    🔹 MAIN GRID
+    ========================================= -->
+    <div class="
+      grid grid-cols-1
+      xl:grid-cols-2
+      gap-4
+    ">
+
+      <!-- =========================================
+      🔹 RISK FACTORS
+      ========================================= -->
+      <div class="
+        glass-effect rounded-2xl p-6
+      ">
+
+        <div class="
+          flex justify-between
+          items-center mb-4
+        ">
+
+          <h4 class="
+            text-sm font-semibold
+            text-white
+          ">
+            Marine Risk Factors
+          </h4>
+
+          <span class="
+            text-xs text-cyan-400
+          ">
+            Mumbai Port
+          </span>
+
+        </div>
+
+        <!-- Dynamic Factors -->
+        <div id="risk-factors"
+             class="space-y-3">
+
+        </div>
+
+      </div>
+
+      <!-- =========================================
+      🔹 ALERTS
+      ========================================= -->
+      <div class="
+        glass-effect rounded-2xl p-6
+      ">
+
+        <div class="
+          flex justify-between
+          items-center mb-4
+        ">
+
+          <h4 class="
+            text-sm font-semibold
+            text-white
+          ">
+            Predictive Marine Alerts
+          </h4>
+
+          <span class="
+            text-xs text-orange-400
+          ">
+            Real-Time
+          </span>
+
+        </div>
+
+        <!-- Dynamic Alerts -->
+        <div id="risk-alerts"
+             class="space-y-3">
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+<!-- =========================================
+📢 ADVISORY REPORT PAGE
+========================================= -->
+<div id="advisory-page"
+     class="page-content hidden">
+
+  <div class="space-y-6">
+
+    <!-- =========================================
+    🔹 HERO SECTION
+    ========================================= -->
+    <div class="
+      glass-effect
+      rounded-3xl
+      p-8
+      border border-cyan-500/10
+    ">
+
+      <div class="
+        flex flex-col
+        lg:flex-row
+        lg:items-center
+        lg:justify-between
+        gap-6
+      ">
+
+        <!-- LEFT -->
+        <div>
+
+          <h1 class="
+            text-4xl
+            font-bold
+            text-white
+            mb-3
+          ">
+            Mumbai Port Marine Advisory System
+          </h1>
+
+          <p class="
+            text-gray-400
+            max-w-3xl
+            leading-relaxed
+          ">
+            AI-powered marine intelligence reports generated using
+            real-time ocean analytics, biodiversity datasets,
+            marine risk assessment and environmental monitoring.
+          </p>
+
+        </div>
+
+        <!-- RIGHT -->
+        <div class="
+          flex flex-col
+          items-start lg:items-end
+          gap-4
+        ">
+
+          <div class="
+            px-4 py-2
+            rounded-xl
+            bg-cyan-500/10
+            border border-cyan-500/20
+            text-cyan-400
+            text-sm
+          ">
+            🌊 Live Mumbai Analytics
+          </div>
+
+          <!-- DOWNLOAD BUTTON -->
+          <button
+            id="download-report-btn"
+
+            class="
+              px-6 py-4
+              rounded-2xl
+
+              bg-cyan-500
+              hover:bg-cyan-400
+
+              transition-all
+              duration-300
+
+              text-black
+              font-semibold
+
+              shadow-lg
+              shadow-cyan-500/20
+
+              hover:scale-105
+            "
+          >
+
+            ⬇ Download Expert Report
+
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- =========================================
+    🔹 SUMMARY CARDS
+    ========================================= -->
+    <div class="
+      grid grid-cols-1
+      md:grid-cols-2
+      xl:grid-cols-5
+      gap-4
+    ">
+
+      <!-- Risk -->
+      <div class="
+        glass-effect
+        rounded-2xl
+        p-5
+      ">
+
+        <p class="
+          text-xs
+          text-gray-500
+          uppercase
+        ">
+          Risk Score
+        </p>
+
+        <h3 id="adv-risk-score"
+            class="
+              text-3xl
+              font-bold
+              text-red-400
+              mt-2
+            ">
+            --
+        </h3>
+
+      </div>
+
+      <!-- Wave -->
+      <div class="
+        glass-effect
+        rounded-2xl
+        p-5
+      ">
+
+        <p class="
+          text-xs
+          text-gray-500
+          uppercase
+        ">
+          Wave Height
+        </p>
+
+        <h3 id="adv-wave"
+            class="
+              text-3xl
+              font-bold
+              text-cyan-400
+              mt-2
+            ">
+            --
+        </h3>
+
+      </div>
+
+      <!-- Oxygen -->
+      <div class="
+        glass-effect
+        rounded-2xl
+        p-5
+      ">
+
+        <p class="
+          text-xs
+          text-gray-500
+          uppercase
+        ">
+          Oxygen
+        </p>
+
+        <h3 id="adv-oxygen"
+            class="
+              text-3xl
+              font-bold
+              text-emerald-400
+              mt-2
+            ">
+            --
+        </h3>
+
+      </div>
+
+      <!-- Temperature -->
+      <div class="
+        glass-effect
+        rounded-2xl
+        p-5
+      ">
+
+        <p class="
+          text-xs
+          text-gray-500
+          uppercase
+        ">
+          Temperature
+        </p>
+
+        <h3 id="adv-temp"
+            class="
+              text-3xl
+              font-bold
+              text-orange-400
+              mt-2
+            ">
+            --
+        </h3>
+
+      </div>
+
+      <!-- Sea -->
+      <div class="
+        glass-effect
+        rounded-2xl
+        p-5
+      ">
+
+        <p class="
+          text-xs
+          text-gray-500
+          uppercase
+        ">
+          Sea Level
+        </p>
+
+        <h3 id="adv-sea"
+            class="
+              text-3xl
+              font-bold
+              text-yellow-400
+              mt-2
+            ">
+            --
+        </h3>
+
+      </div>
+
+    </div>
+
+    <!-- =========================================
+    🔹 REPORT DESCRIPTION
+    ========================================= -->
+    <div class="
+      glass-effect
+      rounded-3xl
+      p-6
+    ">
+
+      <div class="
+        flex justify-between
+        items-center
+        mb-4
+      ">
+
+        <h3 class="
+          text-2xl
+          font-bold
+          text-white
+        ">
+          Advisory Intelligence Feed
+        </h3>
+
+        <span class="
+          px-4 py-2
+          rounded-xl
+
+          bg-cyan-500/10
+          border border-cyan-500/20
+
+          text-cyan-400
+          text-sm
+        ">
+
+          Real-Time Monitoring
+
+        </span>
+
+      </div>
+
+      <p class="
+        text-gray-400
+        leading-relaxed
+      ">
+
+        This advisory system is designed for marine researchers,
+        port authorities, environmental analysts, oceanographers
+        and students working with real-time coastal ecosystem
+        intelligence.
+
+        Reports are dynamically generated using ocean temperature,
+        dissolved oxygen, wave turbulence, sea-level analytics,
+        biodiversity indicators and marine risk assessment.
+
+      </p>
+
+    </div>
+
+    <!-- =========================================
+    🔹 ADVISORY CARDS
+    ========================================= -->
+    <div id="advisory-cards"
+
+         class="
+           grid grid-cols-1
+           lg:grid-cols-2
+           gap-4
+         ">
+
+    </div>
+  </div>
+
+</div>
+
+<!-- =========================================
+     DATA SOURCES PAGE
+========================================= -->
+<div id="datasources-page"
+     class="page-content hidden">
+
+    <div class="space-y-6">
+
+        <!-- Header -->
+        <div class="glass-effect rounded-3xl p-6">
+
+            <h2 class="text-3xl font-bold text-white">
+                Mumbai Port Data Sources
+            </h2>
+
+            <p class="text-gray-400 mt-3">
+                Real-time data sources powering MarineSense
+                analytics for Mumbai Port.
+            </p>
+
+        </div>
+
+        <!-- Data Source Cards -->
+        <div id="datasource-content"
+             class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+
+        </div>
+      </main>
+
+</div>
+</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="auth.js"></script>
+  <script src="app.js"></script>
+  <script src="dashboard.js"></script>
+  <script src="biodiversity.js"></script>
+  <script src="risk.js"></script>
+  <script src="advisory.js"></script>
+  <script src="datasource.js"></script>
+</body>
+</html>
