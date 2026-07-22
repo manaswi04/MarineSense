@@ -13,7 +13,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import letter
 import os
-
+import copernicusmarine
+import math
 
 app = FastAPI()
 
@@ -27,23 +28,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ==========================
-# 🔹 LOAD LOCAL COPERNICUS DATASET
-# ==========================
-DATASET_PATH = r"C:\Users\admin\Desktop\Mnv clg\MarineSense\backend\data\mumbai_marine_data.nc"
-
-try:
-
-    ds = xr.open_dataset(DATASET_PATH)
-
-    print("✅ Copernicus dataset loaded")
-
-except Exception as e:
-
-    print("❌ Dataset Load Error:", e)
-
-    ds = None
 
 
 # ==========================
@@ -61,69 +45,229 @@ history_data = {
 # ==========================
 locations = {
     "mumbai": {
-        "lat": 19.0760,
-        "lon": 72.8777
+        "name": "Mumbai Port",
+        "lat": 18.9438,
+        "lon": 72.8360
+    },
+
+    "goa": {
+        "name": "Mormugao Port",
+        "lat": 15.4121,
+        "lon": 73.7997
+    },
+
+    "kochi": {
+        "name": "Kochi Port",
+        "lat": 9.9658,
+        "lon": 76.2694
+    },
+
+    "chennai": {
+        "name": "Chennai Port",
+        "lat": 13.0844,
+        "lon": 80.2929
+    },
+
+    "vizag": {
+        "name": "Visakhapatnam Port",
+        "lat": 17.6868,
+        "lon": 83.2185
+    },
+
+    "kolkata": {
+        "name": "Kolkata Port",
+        "lat": 22.56,
+        "lon": 88.36
+    },
+
+    "portblair": {
+        "name": "Port Blair Port",
+        "lat": 11.67,
+        "lon": 92.75
     }
 }
-
 # ==========================
 # 🔹 COPERNICUS SEA LEVEL
 # ==========================
-def get_copernicus_sea_level():
+# def get_copernicus_sea_level():
+
+#     try:
+
+#         if ds is None:
+#             return 0
+
+#         sea_level = float(
+#             ds["zos"]
+#             .isel(time=-1)
+#             .mean(skipna=True)
+#             .values
+#         )
+
+#         if math.isnan(sea_level):
+#             return 0
+
+#         return round(sea_level, 2)
+
+#     except Exception as e:
+
+#         print("Sea Level Error:", e)
+
+#         return 0
+
+
+_sea_level_cache = {}
+
+def get_copernicus_sea_level(lat, lon):
+    lat = round(lat, 2)
+    lon = round(lon, 2)
+
+    cache_key = f"{lat},{lon}"
+    now = time.time()
+
+    # Return cached value if it's still fresh
+    if cache_key in _sea_level_cache:
+        cached_value, cached_time = _sea_level_cache[cache_key]
+        if now - cached_time < CACHE_DURATION_SECONDS:
+            return cached_value
 
     try:
+        date = "2026-07-14"
 
-        if ds is None:
-            return 0
-
-        sea_level = float(
-            ds["zos"]
-            .isel(time=-1)
-            .mean(skipna=True)
-            .values
+        sealevel_ds = copernicusmarine.open_dataset(
+            dataset_id="cmems_mod_glo_phy_anfc_0.083deg_P1D-m",
+            minimum_longitude=lon - 0.1,
+            maximum_longitude=lon + 0.1,
+            minimum_latitude=lat - 0.1,
+            maximum_latitude=lat + 0.1,
+            start_datetime=date,
+            end_datetime=date,
+            variables=["zos"]
         )
 
-        if math.isnan(sea_level):
-            return 0
+        sea_level = sealevel_ds["zos"].sel(latitude=lat, longitude=lon, method="nearest")
 
-        return round(sea_level, 2)
+        value = float(sea_level.values[0])
+
+        print("Raw sea level value:", value)
+
+        if math.isnan(value):
+            value = 0.0
+
+        value = round(value, 2)
+        print("after fetched sea level value:", value)
+
+        # Save to cache
+        _sea_level_cache[cache_key] = (value, now)
+
+        return value
 
     except Exception as e:
-
         print("Sea Level Error:", e)
-
-        return 0
-
+        if cache_key in _sea_level_cache:
+            return _sea_level_cache[cache_key][0]
+        return 0.0
 
 # ==========================
 # 🔹 COPERNICUS SALINITY
 # ==========================
-def get_copernicus_salinity():
+# def get_copernicus_salinity():
+
+#     try:
+
+#         if ds is None:
+#             return 35.0
+
+#         salinity = float(
+#             ds["sob"]
+#             .isel(time=-1)
+#             .mean(skipna=True)
+#             .values
+#         )
+
+#         if math.isnan(salinity):
+#             return 35.0
+
+#         return round(salinity, 2)
+
+#     except Exception as e:
+
+#         print("Salinity Error:", e)
+
+#         return 35.0
+
+LOCATIONS = {
+    "Mumbai": {"lat": 19.07, "lon": 72.87},
+    "Goa": {"lat": 15.45, "lon": 73.80},
+}
+
+# Simple in-memory cache: {location_key: (value, timestamp)}
+_salinity_cache = {}
+CACHE_DURATION_SECONDS = 3600  # refetch at most once per hour
+
+def get_copernicus_salinity(lat, lon):
+    lat = round(lat, 2)
+    lon = round(lon, 2)
+    
+    
+
+
+
+    cache_key = f"{lat},{lon}"
+    now = time.time()
+    
+    # Return cached value if it's still fresh
+    if cache_key in _salinity_cache:
+        cached_value, cached_time = _salinity_cache[cache_key]
+        if now - cached_time < CACHE_DURATION_SECONDS:
+            return cached_value
 
     try:
+        # date = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+        date = "2026-07-14"
 
-        if ds is None:
-            return 35.0
-
-        salinity = float(
-            ds["sob"]
-            .isel(time=-1)
-            .mean(skipna=True)
-            .values
+        salinity_ds = copernicusmarine.open_dataset(
+            dataset_id="cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m",
+            minimum_longitude=lon - 0.1,
+            maximum_longitude=lon + 0.1,
+            minimum_latitude=lat - 0.1,
+            maximum_latitude=lat + 0.1,
+            start_datetime=date,
+            end_datetime=date,
+            variables=["so"]
         )
 
-        if math.isnan(salinity):
-            return 35.0
 
-        return round(salinity, 2)
+        salinity = salinity_ds["so"].sel(latitude=lat, longitude=lon, method="nearest")
+        salinity_surface = salinity.isel(depth=0) if "depth" in salinity.dims else salinity
+
+        value = float(salinity_surface.values[0])
+
+        print("Rawbefore value:", value)
+        print("Type:", type(value))
+        print("isNaN:", math.isnan(value))
+
+        if math.isnan(value):
+            value = 34.0
+
+        value = round(value, 2)
+        print("after fetched salinity value:", value)
+        
+        
+
+        # Save to cache
+        _salinity_cache[cache_key] = (value, now)
+
+        return value
 
     except Exception as e:
-
         print("Salinity Error:", e)
-
+        # If we have ANY old cached value, better to serve that than a hardcoded guess
+        if cache_key in _salinity_cache:
+            return _salinity_cache[cache_key][0]
         return 35.0
+    
 
-
+    
 # ==========================
 # 🔹 OPEN METEO REAL DATA
 # ==========================
@@ -227,25 +371,38 @@ def get_sea_data(lat, lon):
 # ==========================
 # 🔹 REAL DISSOLVED OXYGEN
 # ==========================
-def get_real_oxygen(lat, lon):
+# def get_real_oxygen(lat, lon):
 
-    try:
+#     try:
 
-        url = (
-            "https://coastwatch.pfeg.noaa.gov/erddap/griddap/"
-            "erdMH1chla8day.csv?"
-            "time,latitude,longitude"
-        )
+#         url = (
+#             "https://coastwatch.pfeg.noaa.gov/erddap/griddap/"
+#             "erdMH1chla8day.csv?"
+#             "time,latitude,longitude"
+#         )
 
-        # Placeholder until specific oxygen endpoint chosen
+#         # Placeholder until specific oxygen endpoint chosen
 
-        return 5.8
+#         return 5.8
 
-    except Exception as e:
+#     except Exception as e:
 
-        print("NOAA Oxygen Error:", e)
+#         print("NOAA Oxygen Error:", e)
 
-        return 5.5
+#         return 5.5
+
+
+def get_real_oxygen(temperature, salinity):
+    
+    base_oxygen = 6.5  #baseline
+
+    temp_effect = (temperature - 27) * 0.15
+    salinity_effect = (salinity - 33) * 0.05
+
+    oxygen = base_oxygen - temp_effect - salinity_effect
+
+    return round(max(oxygen, 3.0), 2)  #floorto3 this is to avoid neg value okay?
+
 
 # ==========================
 # 🔹 RISK CALCULATION
@@ -345,6 +502,7 @@ def ocean_data(location: str = "mumbai"):
         location.lower(),
         locations["mumbai"]
     )
+    
 
     # ==========================
     # 🔹 REAL SEA DATA
@@ -359,9 +517,11 @@ def ocean_data(location: str = "mumbai"):
     # ==========================
     temperature = sea["temperature"]
 
-    sea_level = get_copernicus_sea_level()
+    sea_level = get_copernicus_sea_level(coords["lat"], coords["lon"])
 
-    salinity = get_copernicus_salinity()
+    salinity = get_copernicus_salinity(coords["lat"], coords["lon"])
+    
+    print("DEBUG lat/lon going into salinity:", coords["lat"], coords["lon"])
 
     oxygen = get_real_oxygen(
     coords["lat"],
@@ -637,13 +797,18 @@ def ocean_data(location: str = "mumbai"):
 
     temperature = round(sea["temperature"], 2)
 
-    sea_level = get_copernicus_sea_level()
+    sea_level = get_copernicus_sea_level(coords["lat"], coords["lon"])
+    LOC = {
+    "lat": 19.07, "lon": 72.87}
+    print(coords)
+    print(type(coords["lat"]))
+    print(repr(coords["lat"]))
 
-    salinity = get_copernicus_salinity()
+
+    salinity = get_copernicus_salinity(coords["lat"], coords["lon"])
         
     oxygen = get_real_oxygen(
-    coords["lat"],
-    coords["lon"]
+    temperature,salinity
     )
 
     # ==========================
@@ -784,6 +949,10 @@ def advisory():
         # 🔹 MUMBAI DATA
         # ==========================
         coords = locations["mumbai"]
+        # coords["lat"] = round(float(coords["lat"]), 2)p
+        # coords["lon"] = round(float(coords["lon"]), 2)
+        coords["lat"] = math.floor(coords["lat"] * 100) / 100
+        coords["lon"] = math.floor(coords["lon"] * 100) / 100
 
         sea = get_sea_data(
             coords["lat"],
@@ -792,9 +961,9 @@ def advisory():
 
         temperature = sea["temperature"]
 
-        sea_level = get_copernicus_sea_level()
+        sea_level = get_copernicus_sea_level(coords["lat"], coords["lon"])
 
-        salinity = get_copernicus_salinity()
+        salinity = get_copernicus_salinity(coords["lat"], coords["lon"])
 
     
         oxygen = get_real_oxygen(
@@ -1019,9 +1188,9 @@ def download_report():
 
         temperature = sea["temperature"]
 
-        sea_level = get_copernicus_sea_level()
+        sea_level = get_copernicus_sea_level(coords["lat"], coords["lon"])
 
-        salinity = get_copernicus_salinity()
+        salinity = get_copernicus_salinity(coords["lat"], coords["lon"])
 
     
         oxygen = get_real_oxygen(
@@ -1299,9 +1468,9 @@ def risk_analysis():
             2
         )
 
-        sea_level = get_copernicus_sea_level()
+        sea_level = get_copernicus_sea_level(coords["lat"], coords["lon"])
 
-        salinity = get_copernicus_salinity()
+        salinity = get_copernicus_salinity(coords["lat"], coords["lon"])
 
     
         oxygen = get_real_oxygen(

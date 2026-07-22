@@ -462,11 +462,12 @@ if (
             loadOceanData
         );
     }
-    // =========================
-    // 🔹 INIT
-    // =========================
-    loadOceanData();
+// =========================
+// 🔹 INIT
+// =========================
+loadOceanData();
 
-    setInterval(loadOceanData, 5000);
+// Refresh every 5 minutes
+setInterval(loadOceanData, 5 * 60 * 1000);
 
 });
