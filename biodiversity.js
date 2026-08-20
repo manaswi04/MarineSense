@@ -7,40 +7,104 @@ document.addEventListener("DOMContentLoaded", () => {
     // =============================================
     // 🔹 CHART VARIABLES
     // =============================================
-    let biodiversityChart;
-    let speciesChart;
+
+    let biodiversityChart = null;
+    let speciesChart = null;
+
+
+    // =============================================
+    // 🔹 GET SELECTED LOCATION
+    // =============================================
+
+    function getSelectedLocation() {
+
+        let location =
+            localStorage.getItem("selectedLocation");
+
+        // If your dashboard stores another key,
+        // this fallback keeps Mumbai as default.
+        if (!location) {
+            location = "mumbai";
+        }
+
+        return location
+            .toLowerCase()
+            .trim();
+    }
+
 
     // =============================================
     // 🔹 LOAD BIODIVERSITY DATA
     // =============================================
+
     async function loadBiodiversityData() {
 
         try {
 
             // =============================================
-            // 🔹 API CALL
+            // GET LOCATION
             // =============================================
-            const res = await fetch(
-                "http://127.0.0.1:8000/api/biodiversity"
+
+            const selectedLocation =
+                getSelectedLocation();
+
+            console.log(
+                "🌿 Biodiversity selected location:",
+                selectedLocation
             );
 
+
+            // =============================================
+            // API URL
+            // IMPORTANT:
+            // BACKTICKS ARE REQUIRED
+            // =============================================
+
+            const apiUrl =
+                `http://127.0.0.1:8000/api/biodiversity?location=${encodeURIComponent(selectedLocation)}`;
+
+            console.log(
+                "📡 Biodiversity API:",
+                apiUrl
+            );
+
+
+            // =============================================
+            // API CALL
+            // =============================================
+
+            const res = await fetch(
+                apiUrl,
+                {
+                    cache: "no-store"
+                }
+            );
+
+
             if (!res.ok) {
+
                 throw new Error(
-                    "Failed to fetch biodiversity data"
+                    `Biodiversity API returned ${res.status}`
                 );
             }
 
-            const result = await res.json();
+
+            const result =
+                await res.json();
+
 
             console.log(
-                "🌿 Biodiversity API:",
+                "🌿 Biodiversity API response:",
                 result
             );
 
+
             // =============================================
-            // 🔹 SAFETY CHECK
+            // SAFETY CHECK
             // =============================================
+
             if (
+                result.status &&
                 result.status !== "success"
             ) {
 
@@ -50,363 +114,732 @@ document.addEventListener("DOMContentLoaded", () => {
                 );
             }
 
-            const beaches =
-                result.data || [];
 
             // =============================================
-            // 🔹 TOP METRICS
+            // EXTRACT DATA
+            //
+            // Supports:
+            // result.data
+            // result.beaches
+            // result.species
             // =============================================
+
+            let beaches = [];
+
+            if (Array.isArray(result.data)) {
+
+                beaches = result.data;
+
+            } else if (
+                Array.isArray(result.beaches)
+            ) {
+
+                beaches = result.beaches;
+
+            } else if (
+                Array.isArray(result.biodiversity)
+            ) {
+
+                beaches =
+                    result.biodiversity;
+            }
+
+
+            console.log(
+                "🌊 Biodiversity records:",
+                beaches
+            );
+
+
+            // =============================================
+            // TOP METRICS
+            // =============================================
+
             const totalBeaches =
                 beaches.length;
 
-            const totalSpecies =
-                result.totalSpecies || 0;
 
-            const avgScore =
-                beaches.length > 0
-                ?
-                (
-                    beaches.reduce(
-                        (acc, beach) =>
-                            acc + beach.biodiversityScore,
+            let totalSpecies = 0;
+
+
+            // =============================================
+            // CALCULATE SPECIES COUNT
+            // =============================================
+
+            beaches.forEach(beach => {
+
+                const species =
+                    Array.isArray(beach.species)
+                        ? beach.species
+                        : [];
+
+                totalSpecies +=
+                    species.length;
+            });
+
+
+            // If backend already gives totalSpecies,
+            // prefer that value.
+
+            if (
+                typeof result.totalSpecies ===
+                "number"
+            ) {
+
+                totalSpecies =
+                    result.totalSpecies;
+            }
+
+
+            // =============================================
+            // BIODIVERSITY SCORE
+            // =============================================
+
+            let avgScore = 0;
+
+
+            if (beaches.length > 0) {
+
+                const scores =
+                    beaches.map(beach => {
+
+                        const score =
+                            Number(
+                                beach.biodiversityScore ??
+                                beach.biodiversity_score ??
+                                beach.score ??
+                                0
+                            );
+
+                        return isNaN(score)
+                            ? 0
+                            : score;
+                    });
+
+
+                const totalScore =
+                    scores.reduce(
+                        (sum, score) =>
+                            sum + score,
                         0
-                    ) / beaches.length
-                ).toFixed(1)
-                :
-                0;
+                    );
+
+
+                avgScore =
+                    (
+                        totalScore /
+                        beaches.length
+                    ).toFixed(1);
+            }
+
 
             // =============================================
-            // 🔹 UPDATE METRICS UI
+            // UPDATE TOP METRICS
             // =============================================
+
             const beachesEl =
                 document.getElementById(
                     "total-beaches"
                 );
+
 
             const speciesEl =
                 document.getElementById(
                     "total-species"
                 );
 
+
             const avgScoreEl =
                 document.getElementById(
                     "avg-score"
                 );
 
+
             if (beachesEl) {
+
                 beachesEl.innerText =
                     totalBeaches;
             }
 
+
             if (speciesEl) {
+
                 speciesEl.innerText =
                     totalSpecies;
             }
 
+
             if (avgScoreEl) {
+
                 avgScoreEl.innerText =
                     avgScore;
             }
 
+
             // =============================================
-            // 🔹 BEACH CARDS
+            // LOCATION NAME
             // =============================================
+
+            const locationEl =
+                document.getElementById(
+                    "biodiversity-location"
+                );
+
+
+            if (locationEl) {
+
+                locationEl.innerText =
+                    result.locationName ||
+                    selectedLocation;
+            }
+
+
+            // =============================================
+            // BEACH CARDS
+            // =============================================
+
             const container =
                 document.getElementById(
                     "beach-cards"
                 );
 
+
             if (container) {
 
                 container.innerHTML = "";
 
-                beaches.forEach(beach => {
 
-                    let riskColor =
-                        "emerald";
+                // =============================================
+                // NO DATA
+                // =============================================
 
-                    if (
-                        beach.riskLevel === "Medium"
-                    ) {
-                        riskColor = "yellow";
-                    }
+                if (beaches.length === 0) {
 
-                    if (
-                        beach.riskLevel === "High"
-                    ) {
-                        riskColor = "red";
-                    }
-
-                    container.innerHTML += `
+                    container.innerHTML = `
 
                         <div class="
+                            col-span-full
                             glass-effect
                             rounded-2xl
-                            p-5
+                            p-8
+                            text-center
                             border
-                            border-${riskColor}-500/20
+                            border-cyan-500/20
                         ">
 
-                            <!-- Header -->
-                            <div class="
-                                flex justify-between
-                                items-start mb-4
+                            <h3 class="
+                                text-xl
+                                font-bold
+                                text-white
+                                mb-2
                             ">
+                                No Biodiversity Data
+                            </h3>
 
-                                <div>
-
-                                    <h3 class="
-                                        text-lg
-                                        font-bold
-                                        text-white
-                                    ">
-                                        ${beach.beach}
-                                    </h3>
-
-                                    <p class="
-                                        text-gray-400
-                                        text-sm mt-1
-                                    ">
-                                        Mumbai Coastal Region
-                                    </p>
-
-                                </div>
-
-                                <span class="
-                                    px-3 py-1
-                                    rounded-full
-                                    text-xs
-                                    bg-${riskColor}-500/20
-                                    text-${riskColor}-400
-                                ">
-                                    ${beach.riskLevel}
-                                </span>
-
-                            </div>
-
-                            <!-- Biodiversity Score -->
-                            <div class="mb-4">
-
-                                <div class="
-                                    flex justify-between
-                                    text-sm mb-2
-                                ">
-
-                                    <span class="
-                                        text-gray-400
-                                    ">
-                                        Biodiversity Score
-                                    </span>
-
-                                    <span class="
-                                        text-cyan-400
-                                    ">
-                                        ${beach.biodiversityScore}
-                                    </span>
-
-                                </div>
-
-                                <div class="
-                                    w-full h-2
-                                    bg-white/5
-                                    rounded-full
-                                ">
-
-                                    <div
-                                        class="
-                                            h-2 rounded-full
-                                            bg-cyan-400
-                                        "
-
-                                        style="
-                                            width:
-                                            ${beach.biodiversityScore}%
-                                        "
-                                    ></div>
-
-                                </div>
-
-                            </div>
-
-                            <!-- Species Tags -->
-                            <div class="
-                                flex flex-wrap gap-2
+                            <p class="
+                                text-gray-400
                             ">
+                                No biodiversity records
+                                are currently available
+                                for ${selectedLocation}.
+                            </p>
 
-                                ${beach.species.map(species => `
+                        </div>
+
+                    `;
+
+                } else {
+
+
+                    // =============================================
+                    // CREATE BEACH CARDS
+                    // =============================================
+
+                    beaches.forEach(beach => {
+
+                        // -----------------------------
+                        // SAFE VALUES
+                        // -----------------------------
+
+                        const beachName =
+                            beach.beach ||
+                            beach.name ||
+                            beach.location ||
+                            "Marine Zone";
+
+
+                        const riskLevel =
+                            beach.riskLevel ||
+                            beach.risk ||
+                            "Low";
+
+
+                        const biodiversityScore =
+                            Number(
+                                beach.biodiversityScore ??
+                                beach.biodiversity_score ??
+                                beach.score ??
+                                0
+                            );
+
+
+                        const species =
+                            Array.isArray(
+                                beach.species
+                            )
+                                ? beach.species
+                                : [];
+
+
+                        // -----------------------------
+                        // RISK COLOR
+                        // -----------------------------
+
+                        let riskColor =
+                            "emerald";
+
+
+                        if (
+                            riskLevel === "Medium"
+                        ) {
+
+                            riskColor =
+                                "yellow";
+                        }
+
+
+                        if (
+                            riskLevel === "High"
+                        ) {
+
+                            riskColor =
+                                "red";
+                        }
+
+
+                        if (
+                            riskLevel === "Critical"
+                        ) {
+
+                            riskColor =
+                                "red";
+                        }
+
+
+                        // -----------------------------
+                        // SPECIES HTML
+                        // -----------------------------
+
+                        let speciesHTML = "";
+
+
+                        if (
+                            species.length > 0
+                        ) {
+
+                            speciesHTML =
+                                species.map(
+                                    item => `
 
                                     <span class="
-                                        px-2 py-1
+                                        px-2
+                                        py-1
                                         rounded-lg
                                         bg-white/5
                                         text-xs
                                         text-gray-300
                                     ">
-                                        ${species}
+                                        ${item}
                                     </span>
 
-                                `).join("")}
+                                `
+                                ).join("");
+
+                        } else {
+
+                            speciesHTML = `
+
+                                <span class="
+                                    text-xs
+                                    text-gray-500
+                                ">
+                                    Species data unavailable
+                                </span>
+
+                            `;
+                        }
+
+
+                        // -----------------------------
+                        // CARD
+                        // -----------------------------
+
+                        container.innerHTML += `
+
+                            <div class="
+                                glass-effect
+                                rounded-2xl
+                                p-5
+                                border
+                                border-${riskColor}-500/20
+                            ">
+
+                                <div class="
+                                    flex
+                                    justify-between
+                                    items-start
+                                    mb-4
+                                ">
+
+                                    <div>
+
+                                        <h3 class="
+                                            text-lg
+                                            font-bold
+                                            text-white
+                                        ">
+                                            ${beachName}
+                                        </h3>
+
+                                        <p class="
+                                            text-gray-400
+                                            text-sm
+                                            mt-1
+                                        ">
+                                            ${result.locationName || selectedLocation}
+                                        </p>
+
+                                    </div>
+
+
+                                    <span class="
+                                        px-3
+                                        py-1
+                                        rounded-full
+                                        text-xs
+                                        bg-${riskColor}-500/20
+                                        text-${riskColor}-400
+                                    ">
+                                        ${riskLevel}
+                                    </span>
+
+                                </div>
+
+
+                                <!-- Biodiversity Score -->
+
+                                <div class="mb-4">
+
+                                    <div class="
+                                        flex
+                                        justify-between
+                                        text-sm
+                                        mb-2
+                                    ">
+
+                                        <span class="
+                                            text-gray-400
+                                        ">
+                                            Biodiversity Score
+                                        </span>
+
+
+                                        <span class="
+                                            text-cyan-400
+                                        ">
+                                            ${biodiversityScore}
+                                        </span>
+
+                                    </div>
+
+
+                                    <div class="
+                                        w-full
+                                        h-2
+                                        bg-white/5
+                                        rounded-full
+                                    ">
+
+                                        <div
+                                            class="
+                                                h-2
+                                                rounded-full
+                                                bg-cyan-400
+                                            "
+                                            style="
+                                                width:
+                                                ${Math.max(
+                                                    0,
+                                                    Math.min(
+                                                        biodiversityScore,
+                                                        100
+                                                    )
+                                                )}%
+                                            "
+                                        ></div>
+
+                                    </div>
+
+                                </div>
+
+
+                                <!-- Species -->
+
+                                <div class="
+                                    flex
+                                    flex-wrap
+                                    gap-2
+                                ">
+
+                                    ${speciesHTML}
+
+                                </div>
 
                             </div>
 
-                        </div>
-                    `;
-                });
+                        `;
+                    });
+                }
             }
 
+
             // =============================================
-            // 🔹 CHART DATA
+            // CHART DATA
             // =============================================
+
             const labels =
                 beaches.map(
-                    beach => beach.beach
+                    beach =>
+                        beach.beach ||
+                        beach.name ||
+                        beach.location ||
+                        "Marine Zone"
                 );
+
 
             const scores =
                 beaches.map(
                     beach =>
-                    beach.biodiversityScore
+                        Number(
+                            beach.biodiversityScore ??
+                            beach.biodiversity_score ??
+                            beach.score ??
+                            0
+                        )
                 );
+
 
             const speciesCounts =
                 beaches.map(
                     beach =>
-                    beach.species.length
+                        Array.isArray(
+                            beach.species
+                        )
+                            ? beach.species.length
+                            : 0
                 );
 
+
             // =============================================
-            // 🔹 BIODIVERSITY BAR CHART
+            // BIODIVERSITY BAR CHART
             // =============================================
-            if (biodiversityChart) {
-                biodiversityChart.destroy();
-            }
 
-            biodiversityChart =
-                new Chart(
+            const biodiversityCanvas =
+                document.getElementById(
+                    "biodiversityChart"
+                );
 
-                    document.getElementById(
-                        "biodiversityChart"
-                    ),
 
-                    {
-                        type: "bar",
+            if (
+                biodiversityCanvas &&
+                typeof Chart !== "undefined"
+            ) {
 
-                        data: {
+                if (biodiversityChart) {
 
-                            labels,
+                    biodiversityChart.destroy();
+                }
 
-                            datasets: [{
 
-                                label:
-                                    "Biodiversity Score",
+                biodiversityChart =
+                    new Chart(
+                        biodiversityCanvas,
+                        {
 
-                                data: scores,
+                            type: "bar",
 
-                                backgroundColor:
-                                    "rgba(34,211,238,0.6)",
+                            data: {
 
-                                borderRadius: 10
-                            }]
-                        },
+                                labels: labels,
 
-                        options: {
+                                datasets: [{
 
-                            responsive: true,
+                                    label:
+                                        "Biodiversity Score",
 
-                            maintainAspectRatio: false,
+                                    data:
+                                        scores,
 
-                            plugins: {
+                                    backgroundColor:
+                                        "rgba(34,211,238,0.6)",
 
-                                legend: {
-                                    display: false
-                                }
+                                    borderRadius:
+                                        10
+
+                                }]
                             },
 
-                            scales: {
 
-                                x: {
-                                    ticks: {
-                                        color: "#9ca3af"
-                                    },
+                            options: {
 
-                                    grid: {
-                                        display: false
+                                responsive:
+                                    true,
+
+                                maintainAspectRatio:
+                                    false,
+
+                                plugins: {
+
+                                    legend: {
+
+                                        display:
+                                            false
                                     }
                                 },
 
-                                y: {
 
-                                    beginAtZero: true,
+                                scales: {
 
-                                    ticks: {
-                                        color: "#9ca3af"
+                                    x: {
+
+                                        ticks: {
+
+                                            color:
+                                                "#9ca3af"
+                                        },
+
+                                        grid: {
+
+                                            display:
+                                                false
+                                        }
                                     },
 
-                                    grid: {
-                                        color:
-                                        "rgba(255,255,255,0.05)"
+
+                                    y: {
+
+                                        beginAtZero:
+                                            true,
+
+                                        max:
+                                            100,
+
+                                        ticks: {
+
+                                            color:
+                                                "#9ca3af"
+                                        },
+
+                                        grid: {
+
+                                            color:
+                                                "rgba(255,255,255,0.05)"
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                );
-
-            // =============================================
-            // 🔹 SPECIES DOUGHNUT CHART
-            // =============================================
-            if (speciesChart) {
-                speciesChart.destroy();
+                    );
             }
 
-            speciesChart =
-                new Chart(
 
-                    document.getElementById(
-                        "speciesChart"
-                    ),
+            // =============================================
+            // SPECIES DOUGHNUT CHART
+            // =============================================
 
-                    {
-                        type: "doughnut",
+            const speciesCanvas =
+                document.getElementById(
+                    "speciesChart"
+                );
 
-                        data: {
 
-                            labels,
+            if (
+                speciesCanvas &&
+                typeof Chart !== "undefined"
+            ) {
 
-                            datasets: [{
+                if (speciesChart) {
 
-                                data: speciesCounts,
+                    speciesChart.destroy();
+                }
 
-                                backgroundColor: [
 
-                                    "#22d3ee",
-                                    "#10b981",
-                                    "#fbbf24",
-                                    "#ef4444"
-                                ],
+                speciesChart =
+                    new Chart(
+                        speciesCanvas,
+                        {
 
-                                borderWidth: 0
-                            }]
-                        },
+                            type:
+                                "doughnut",
 
-                        options: {
+                            data: {
 
-                            responsive: true,
+                                labels:
+                                    labels,
 
-                            maintainAspectRatio: false,
+                                datasets: [{
 
-                            plugins: {
+                                    data:
+                                        speciesCounts,
 
-                                legend: {
+                                    backgroundColor: [
 
-                                    labels: {
-                                        color: "#9ca3af"
+                                        "#22d3ee",
+                                        "#10b981",
+                                        "#fbbf24",
+                                        "#ef4444",
+                                        "#8b5cf6",
+                                        "#3b82f6"
+
+                                    ],
+
+                                    borderWidth:
+                                        0
+
+                                }]
+                            },
+
+
+                            options: {
+
+                                responsive:
+                                    true,
+
+                                maintainAspectRatio:
+                                    false,
+
+                                plugins: {
+
+                                    legend: {
+
+                                        labels: {
+
+                                            color:
+                                                "#9ca3af"
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                );
+                    );
+            }
+
+
+            console.log(
+                "✅ Biodiversity dashboard updated for:",
+                result.locationName ||
+                selectedLocation
+            );
 
         } catch (error) {
 
@@ -415,10 +848,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 error
             );
 
+
+            // =============================================
+            // SHOW ERROR
+            // =============================================
+
             const container =
                 document.getElementById(
                     "beach-cards"
                 );
+
 
             if (container) {
 
@@ -430,35 +869,56 @@ document.addEventListener("DOMContentLoaded", () => {
                         rounded-2xl
                         p-8
                         text-center
+                        border
+                        border-red-500/20
                     ">
 
                         <h3 class="
-                            text-xl font-bold
-                            text-red-400 mb-2
+                            text-xl
+                            font-bold
+                            text-red-400
+                            mb-2
                         ">
                             Failed to Load Biodiversity Data
                         </h3>
 
-                        <p class="text-gray-400">
-                            Check backend API connection
+                        <p class="
+                            text-gray-400
+                            mb-2
+                        ">
+                            ${error.message}
+                        </p>
+
+                        <p class="
+                            text-gray-500
+                            text-sm
+                        ">
+                            Check the backend API
+                            and browser console.
                         </p>
 
                     </div>
+
                 `;
             }
         }
     }
 
+
     // =============================================
     // 🔹 INITIAL LOAD
     // =============================================
+
     loadBiodiversityData();
+
 
     // =============================================
     // 🔹 AUTO REFRESH
     // =============================================
+
     setInterval(
         loadBiodiversityData,
         60000
     );
+
 });

@@ -1,473 +1,1174 @@
-document.addEventListener("DOMContentLoaded", function () {
+// ============================================================
+// MarineSense Dashboard
+// ============================================================
 
-    // =========================
-    // 🔹 LIVE CLOCK
-    // =========================
-    function startLiveClock() {
+console.log("🌊 MarineSense dashboard.js loaded");
 
-        function updateClock() {
+// ============================================================
+// CONFIG
+// ============================================================
 
-            const now = new Date();
+const API_BASE =
+    "http://127.0.0.1:8000";
 
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const seconds = String(now.getSeconds()).padStart(2, '0');
+// ============================================================
+// CHART VARIABLES
+// ============================================================
 
-            const clock =
-                document.getElementById("live-clock");
+let tempChart = null;
+let salinityChart = null;
+let currentChart = null;
 
-            if (clock) {
-                clock.innerText =
-                    `${hours}:${minutes}:${seconds}`;
-            }
-        }
+// ============================================================
+// SAFE NUMBER
+// ============================================================
 
-        updateClock();
+function safeNumber(value, fallback = 0) {
 
-        setInterval(updateClock, 1000);
+    const number = Number(value);
+
+    return Number.isFinite(number)
+        ? number
+        : fallback;
+}
+
+// ============================================================
+// FORMAT TIME
+// ============================================================
+
+function formatGraphTime(value) {
+
+    if (!value) {
+        return "";
     }
 
-    startLiveClock();
+    try {
 
-    // =========================
-    // 🔹 CHART CONFIG
-    // =========================
-    Chart.defaults.color = "#9ca3af";
+        // Backend:
+        // 2026-08-20T11:00
 
-    const commonOptions = {
+        if (value.includes("T")) {
+
+            return value
+                .split("T")[1]
+                .substring(0, 5);
+        }
+
+        return value;
+
+    } catch (error) {
+
+        return value;
+    }
+}
+
+// ============================================================
+// GET ELEMENT
+// ============================================================
+
+function getElement(id) {
+
+    return document.getElementById(id);
+}
+
+// ============================================================
+// UPDATE TEXT
+// ============================================================
+
+function setText(id, value) {
+
+    const element = getElement(id);
+
+    if (element) {
+        element.textContent = value;
+    }
+}
+
+// ============================================================
+// CREATE CHART OPTIONS
+// ============================================================
+
+function chartOptions() {
+
+    return {
+
         responsive: true,
+
         maintainAspectRatio: false,
 
+        animation: false,
+
+        interaction: {
+            intersect: false,
+            mode: "index"
+        },
+
         plugins: {
+
             legend: {
-                display: false
+                labels: {
+                    color: "#d1d5db"
+                }
             }
+
         },
 
         scales: {
-            x: {
-                ticks: { color: "#9ca3af" },
-                grid: { display: false }
-            },
 
-            y: {
-                ticks: { color: "#9ca3af" },
+            x: {
+
+                ticks: {
+                    color: "#9ca3af"
+                },
+
                 grid: {
                     color: "rgba(255,255,255,0.05)"
                 }
+
+            },
+
+            y: {
+
+                ticks: {
+                    color: "#9ca3af"
+                },
+
+                grid: {
+                    color: "rgba(255,255,255,0.05)"
+                },
+
+                beginAtZero: false
+
             }
+
         }
+
     };
+}
 
-    // =========================
-    // 🔹 TEMPERATURE CHART
-    // =========================
-    const tempChart = new Chart(
-        document.getElementById("tempChart"),
+// ============================================================
+// DESTROY OLD CHARTS
+// ============================================================
 
+function destroyCharts() {
+
+    if (tempChart) {
+
+        tempChart.destroy();
+        tempChart = null;
+
+    }
+
+    if (salinityChart) {
+
+        salinityChart.destroy();
+        salinityChart = null;
+
+    }
+
+    if (currentChart) {
+
+        currentChart.destroy();
+        currentChart = null;
+
+    }
+
+}
+
+// ============================================================
+// INITIALIZE CHARTS
+// ============================================================
+
+function initializeCharts() {
+
+    console.log("📊 Initializing charts...");
+
+    if (typeof Chart === "undefined") {
+
+        console.error(
+            "❌ Chart.js is not loaded"
+        );
+
+        return false;
+    }
+
+    const tempCanvas =
+        getElement("tempChart");
+
+    const salinityCanvas =
+        getElement("salinityChart");
+
+    const currentCanvas =
+        getElement("oxygenChart");
+
+    console.log(
+        "Canvas:",
         {
-            type: "line",
-
-            data: {
-                labels: [],
-                datasets: [{
-                    label: "Temperature",
-
-                    data: [],
-
-                    borderColor: "#f97316",
-
-                    backgroundColor:
-                        "rgba(249,115,22,0.1)",
-
-                    fill: true,
-                    tension: 0.4
-                }]
-            },
-
-            options: commonOptions
+            tempCanvas,
+            salinityCanvas,
+            currentCanvas
         }
     );
 
-    // =========================
-    // 🔹 SALINITY CHART
-    // =========================
-    const salinityChart = new Chart(
-        document.getElementById("salinityChart"),
+    if (!tempCanvas) {
 
+        console.error(
+            "❌ tempChart canvas not found"
+        );
+
+        return false;
+    }
+
+    if (!salinityCanvas) {
+
+        console.error(
+            "❌ salinityChart canvas not found"
+        );
+
+        return false;
+    }
+
+    if (!currentCanvas) {
+
+        console.error(
+            "❌ oxygenChart canvas not found"
+        );
+
+        return false;
+    }
+
+    destroyCharts();
+
+    // ========================================================
+    // TEMPERATURE
+    // ========================================================
+
+    tempChart = new Chart(
+        tempCanvas,
         {
+
             type: "line",
 
             data: {
+
                 labels: [],
 
-                datasets: [{
-                    label: "Salinity",
+                datasets: [
 
-                    data: [],
+                    {
 
-                    borderColor: "#22d3ee",
+                        label: "Sea Temperature (°C)",
 
-                    backgroundColor:
-                        "rgba(34,211,238,0.1)",
+                        data: [],
 
-                    fill: true,
-                    tension: 0.4
-                }]
-            },
+                        borderColor: "#22d3ee",
 
-            options: commonOptions
-        }
-    );
+                        backgroundColor:
+                            "rgba(34,211,238,0.10)",
 
-    // =========================
-    // 🔹 OXYGEN CHART
-    // =========================
-    const oxygenChart = new Chart(
-        document.getElementById("oxygenChart"),
+                        borderWidth: 2,
 
-        {
-            type: "line",
+                        fill: true,
 
-            data: {
-                labels: [],
+                        tension: 0.35,
 
-                datasets: [{
-                    label: "Oxygen",
+                        pointRadius: 4,
 
-                    data: [],
+                        pointHoverRadius: 6
 
-                    borderColor: "#10b981",
-
-                    backgroundColor:
-                        "rgba(16,185,129,0.1)",
-
-                    fill: true,
-                    tension: 0.4
-                }]
-            },
-
-            options: commonOptions
-        }
-    );
-
-    // =========================
-    // 🔹 ADVISORY CHART
-    // =========================
-    const advisoryChart = new Chart(
-        document.getElementById("advisoryChart"),
-
-        {
-            type: "doughnut",
-
-            data: {
-                labels: [
-                    "Safe",
-                    "Restricted",
-                    "Danger"
-                ],
-
-                datasets: [{
-                    data: [70, 20, 10],
-
-                    backgroundColor: [
-                        "#10b981",
-                        "#fbbf24",
-                        "#ef4444"
-                    ],
-
-                    borderWidth: 0
-                }]
-            },
-
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-
-                plugins: {
-                    legend: {
-                        labels: {
-                            color: "#9ca3af"
-                        }
                     }
-                }
-            }
+
+                ]
+
+            },
+
+            options: chartOptions()
+
         }
     );
 
-    // =========================
-    // 🔹 LOAD OCEAN DATA
-    // =========================
-    async function loadOceanData() {
+    // ========================================================
+    // SALINITY
+    // ========================================================
 
-        try {
+    salinityChart = new Chart(
+        salinityCanvas,
+        {
 
-            const locationSelect =
-                document.getElementById(
-                    "location-select"
-                );
+            type: "line",
 
-            const location =
-                locationSelect
-                ? locationSelect.value
-                : "mumbai";
+            data: {
 
-            const res = await fetch(
-                `http://127.0.0.1:8000/api/ocean-data?location=${location}`
+                labels: [],
+
+                datasets: [
+
+                    {
+
+                        label: "Salinity (PSU)",
+
+                        data: [],
+
+                        borderColor: "#60a5fa",
+
+                        backgroundColor:
+                            "rgba(96,165,250,0.10)",
+
+                        borderWidth: 2,
+
+                        fill: true,
+
+                        tension: 0.35,
+
+                        pointRadius: 4,
+
+                        pointHoverRadius: 6
+
+                    }
+
+                ]
+
+            },
+
+            options: chartOptions()
+
+        }
+    );
+
+    // ========================================================
+    // OCEAN CURRENT
+    // ========================================================
+
+    currentChart = new Chart(
+        currentCanvas,
+        {
+
+            type: "line",
+
+            data: {
+
+                labels: [],
+
+                datasets: [
+
+                    {
+
+                        label:
+                            "Ocean Current Velocity (m/s)",
+
+                        data: [],
+
+                        borderColor: "#34d399",
+
+                        backgroundColor:
+                            "rgba(52,211,153,0.10)",
+
+                        borderWidth: 2,
+
+                        fill: true,
+
+                        tension: 0.35,
+
+                        pointRadius: 4,
+
+                        pointHoverRadius: 6
+
+                    }
+
+                ]
+
+            },
+
+            options: chartOptions()
+
+        }
+    );
+
+    console.log(
+        "✅ Charts initialized"
+    );
+
+    return true;
+}
+
+// ============================================================
+// UPDATE CHARTS
+// ============================================================
+
+function updateCharts(history) {
+
+    if (!Array.isArray(history)) {
+
+        console.error(
+            "❌ History is not an array:",
+            history
+        );
+
+        return;
+    }
+
+    if (
+        !tempChart ||
+        !salinityChart ||
+        !currentChart
+    ) {
+
+        console.warn(
+            "⚠️ Charts not initialized. Initializing..."
+        );
+
+        if (!initializeCharts()) {
+            return;
+        }
+    }
+
+    // ========================================================
+    // LABELS
+    // ========================================================
+
+    const labels =
+        history.map(
+            point =>
+                formatGraphTime(point.time)
+        );
+
+    // ========================================================
+    // TEMPERATURE
+    // ========================================================
+
+    const temperatures =
+        history.map(
+            point =>
+                safeNumber(
+                    point.temperature
+                )
+        );
+
+    // ========================================================
+    // SALINITY
+    // ========================================================
+
+    const salinities =
+        history.map(
+            point =>
+                safeNumber(
+                    point.salinity
+                )
+        );
+
+    // ========================================================
+    // CURRENT VELOCITY
+    // ========================================================
+
+    const currents =
+        history.map(
+            point =>
+                safeNumber(
+                    point.currentVelocity
+                )
+        );
+
+    console.log(
+        "📈 Chart data:",
+        {
+            labels,
+            temperatures,
+            salinities,
+            currents
+        }
+    );
+
+    // ========================================================
+    // UPDATE TEMPERATURE
+    // ========================================================
+
+    tempChart.data.labels = labels;
+
+    tempChart.data.datasets[0].data =
+        temperatures;
+
+    tempChart.update();
+
+    // ========================================================
+    // UPDATE SALINITY
+    // ========================================================
+
+    salinityChart.data.labels = labels;
+
+    salinityChart.data.datasets[0].data =
+        salinities;
+
+    salinityChart.update();
+
+    // ========================================================
+    // UPDATE CURRENT
+    // ========================================================
+
+    currentChart.data.labels = labels;
+
+    currentChart.data.datasets[0].data =
+        currents;
+
+    currentChart.update();
+
+    console.log(
+        "✅ All graphs updated"
+    );
+}
+
+// ============================================================
+// UPDATE DASHBOARD CARDS
+// ============================================================
+
+function updateDashboardCards(ocean, data) {
+
+    console.log(
+        "📊 Updating dashboard cards:",
+        ocean
+    );
+
+    // ========================================================
+    // TEMPERATURE
+    // ========================================================
+
+    const temperature =
+        safeNumber(
+            ocean.temperature
+        );
+
+    setText(
+        "temp-value",
+        temperature.toFixed(2) + " °C"
+    );
+
+    // ========================================================
+    // SALINITY
+    // ========================================================
+
+    const salinity =
+        safeNumber(
+            ocean.salinity
+        );
+
+    setText(
+        "salinity-value",
+        salinity.toFixed(2) + " PSU"
+    );
+
+    // ========================================================
+    // OCEAN CURRENT
+    // ========================================================
+
+    const currentVelocity =
+        safeNumber(
+            ocean.currentVelocity
+        );
+
+    setText(
+        "oxygen-value",
+        currentVelocity.toFixed(2) + " m/s"
+    );
+
+    // ========================================================
+    // RISK LEVEL
+    // ========================================================
+
+    const riskLevel =
+        ocean.riskLevel || "Unknown";
+
+    setText(
+        "risk-level",
+        riskLevel
+    );
+
+    // ========================================================
+    // SEA LEVEL
+    // ========================================================
+
+    const seaLevel =
+        safeNumber(
+            ocean.seaLevel
+        );
+
+    setText(
+        "sea-level",
+        seaLevel.toFixed(2) + " m"
+    );
+
+    // ========================================================
+    // WAVE HEIGHT
+    // ========================================================
+
+    const waveHeight =
+        safeNumber(
+            ocean.waveHeight
+        );
+
+    setText(
+        "wave-height",
+        waveHeight.toFixed(2) + " m"
+    );
+
+    // ========================================================
+    // WAVE BAR
+    // ========================================================
+
+    const waveBar =
+        getElement("wave-bar");
+
+    if (waveBar) {
+
+        const wavePercent =
+            Math.min(
+                (waveHeight / 4) * 100,
+                100
             );
 
-            const data = await res.json();
+        waveBar.style.width =
+            wavePercent + "%";
+    }
 
-            console.log("🌊 API:", data);
+    // ========================================================
+    // WIND SPEED
+    // ========================================================
 
-            const ocean = data.data;
-            const history = data.history;
+    const windSpeed =
+        safeNumber(
+            ocean.windSpeed
+        );
 
-            // =========================
-            // 🔹 UPDATE CARDS
-            // =========================
-            document.getElementById(
-                "temp-value"
-            ).innerText =
-                ocean.temperature.toFixed(2) + " °C";
+    setText(
+        "wind-speed",
+        windSpeed.toFixed(1) + " km/h"
+    );
 
-            document.getElementById(
-                "salinity-value"
-            ).innerText =
-                ocean.salinity.toFixed(2) + " PSU";
+    // ========================================================
+    // WIND BAR
+    // ========================================================
 
-            document.getElementById(
-                "oxygen-value"
-            ).innerText =
-                ocean.oxygen.toFixed(2) + " mg/L";
+    const windBar =
+        getElement("wind-bar");
 
-            document.getElementById(
-                "risk-level"
-            ).innerText =
-                ocean.riskLevel;
+    if (windBar) {
 
-            document.getElementById(
-                "riskScore"
-            ).innerText =
-                ocean.riskScore;
+        const windPercent =
+            Math.min(
+                (windSpeed / 40) * 100,
+                100
+            );
 
-            document.getElementById(
-                "sea-level"
-            ).innerText =
-                ocean.seaLevel.toFixed(2) + " m";
+        windBar.style.width =
+            windPercent + "%";
+    }
 
-            // =========================
-            // 🔹 UPDATE TIME
-            // =========================
-            const timeElement =
-                document.getElementById(
-                    "update-time"
+    // ========================================================
+    // ADVISORY
+    // ========================================================
+
+    const advisory =
+        ocean.advisory || "Safe";
+
+    const advisoryElement =
+        getElement("advisory-status");
+
+    if (advisoryElement) {
+
+        advisoryElement.textContent =
+            advisory.toUpperCase();
+
+        advisoryElement.className =
+            "px-3 py-1 rounded-full text-sm";
+
+        if (advisory === "Danger") {
+
+            advisoryElement.classList.add(
+                "bg-red-500/20",
+                "text-red-400"
+            );
+
+        } else if (
+            advisory === "Restricted"
+        ) {
+
+            advisoryElement.classList.add(
+                "bg-yellow-500/20",
+                "text-yellow-400"
+            );
+
+        } else {
+
+            advisoryElement.classList.add(
+                "bg-emerald-500/20",
+                "text-emerald-400"
+            );
+        }
+    }
+
+    // ========================================================
+    // RISK SCORE
+    // ========================================================
+
+    const riskScore =
+        safeNumber(
+            ocean.riskScore
+        );
+
+    setText(
+        "riskScore",
+        Math.round(riskScore)
+    );
+
+    // ========================================================
+    // RISK LABEL
+    // ========================================================
+
+    setText(
+        "risk-label",
+        riskLevel.toUpperCase()
+    );
+
+    // ========================================================
+    // RISK CIRCLE
+    // ========================================================
+
+    const riskProgress =
+        getElement("risk-progress");
+
+    if (riskProgress) {
+
+        const circumference = 440;
+
+        const offset =
+            circumference -
+            (
+                riskScore / 100
+            ) * circumference;
+
+        riskProgress.style.strokeDashoffset =
+            offset;
+    }
+
+    // ========================================================
+    // LOCATION LABELS
+    // ========================================================
+
+    const locationName =
+        data.locationName ||
+        "Marine Location";
+
+    document
+        .querySelectorAll(
+            "#dashboard-page span"
+        )
+        .forEach(
+            element => {
+
+                const text =
+                    element.textContent
+                        .trim();
+
+                if (
+                    text === "Mumbai Port"
+                ) {
+
+                    element.textContent =
+                        locationName;
+                }
+
+            }
+        );
+
+    // ========================================================
+    // CLUSTERS
+    // ========================================================
+
+    updateClusters(
+        ocean.clusters
+    );
+
+    // ========================================================
+    // LAST UPDATED
+    // ========================================================
+
+    const updateTime =
+        getElement("update-time");
+
+    if (updateTime) {
+
+        if (data.timestamp) {
+
+            const time =
+                new Date(
+                    data.timestamp
                 );
 
-            if (timeElement) {
+            if (
+                !Number.isNaN(
+                    time.getTime()
+                )
+            ) {
 
-                timeElement.innerText =
-                    "Last updated: " +
-                    new Date(
-                        data.timestamp
-                    ).toLocaleTimeString();
+                updateTime.textContent =
+                    "Updated: " +
+                    time.toLocaleTimeString(
+                        "en-IN",
+                        {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit"
+                        }
+                    );
+
+            } else {
+
+                updateTime.textContent =
+                    "Live data";
+
             }
 
-            // =========================
-            // 🔹 UPDATE CHARTS
-            // =========================
-            tempChart.data.labels =
-                history.timestamps;
+        } else {
 
-            tempChart.data.datasets[0].data =
-                history.temperature;
-
-            tempChart.update();
-
-            salinityChart.data.labels =
-                history.timestamps;
-
-            salinityChart.data.datasets[0].data =
-                history.salinity;
-
-            salinityChart.update();
-
-            oxygenChart.data.labels =
-                history.timestamps;
-
-            oxygenChart.data.datasets[0].data =
-                history.oxygen;
-
-            oxygenChart.update();
-
-            // =========================
-            // 🔹 ADVISORY STATUS
-            // =========================
-            document.getElementById(
-    "wave-height"
-).innerText =
-    ocean.waveHeight.toFixed(2) + " m";
-
-document.getElementById(
-    "wind-speed"
-).innerText =
-    ocean.windSpeed.toFixed(2) + " km/h";
-
-document.getElementById(
-    "wave-bar"
-).style.width =
-    `${Math.min(ocean.waveHeight * 30, 100)}%`;
-
-document.getElementById(
-    "wind-bar"
-).style.width =
-    `${Math.min(ocean.windSpeed * 4, 100)}%`;
-
-const advisoryEl =
-    document.getElementById(
-        "advisory-status"
-    );
-
-advisoryEl.innerText =
-    ocean.advisory;
-
-if (ocean.advisory === "Safe") {
-
-    advisoryEl.className =
-        "px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-sm";
+            updateTime.textContent =
+                "Live data";
+        }
+    }
 }
 
-else if (
-    ocean.advisory === "Restricted"
-) {
+// ============================================================
+// CLUSTERS
+// ============================================================
 
-    advisoryEl.className =
-        "px-3 py-1 rounded-full bg-yellow-500/20 text-yellow-400 text-sm";
-}
+function updateClusters(clusters) {
 
-else {
+    const container =
+        getElement(
+            "cluster-container"
+        );
 
-    advisoryEl.className =
-        "px-3 py-1 rounded-full bg-red-500/20 text-red-400 text-sm";
-}
-            // =========================
-            // 🔹 CLUSTERS
-            // =========================
-            const clusterContainer =
-    document.getElementById(
-        "cluster-container"
-    );
+    if (!container) {
+        return;
+    }
 
-if (
-    clusterContainer &&
-    ocean.clusters
-) {
+    container.innerHTML = "";
 
-    clusterContainer.innerHTML = "";
+    if (
+        !Array.isArray(clusters) ||
+        clusters.length === 0
+    ) {
 
-    ocean.clusters.forEach(
+        container.innerHTML = `
+            <div class="glass-effect rounded-xl p-4">
+                <p class="text-gray-400 text-sm">
+                    No zone data available
+                </p>
+            </div>
+        `;
+
+        return;
+    }
+
+    clusters.forEach(
         cluster => {
 
-        let color =
-            "emerald";
+            let badgeClass =
+                "bg-emerald-500/20 text-emerald-400";
 
-        if (
-            cluster.risk === "Medium"
-        ) {
-            color = "yellow";
-        }
+            if (
+                cluster.risk === "Medium"
+            ) {
 
-        if (
-            cluster.risk === "High"
-        ) {
-            color = "red";
-        }
+                badgeClass =
+                    "bg-yellow-500/20 text-yellow-400";
 
-        clusterContainer.innerHTML += `
+            } else if (
+                cluster.risk === "High"
+            ) {
 
-            <div class="
-                p-4 rounded-xl
-                bg-white/5
-                border border-${color}-500/30
-            ">
+                badgeClass =
+                    "bg-red-500/20 text-red-400";
+            }
+
+            container.innerHTML += `
 
                 <div class="
-                    flex justify-between items-center
+                    glass-effect
+                    rounded-xl
+                    p-4
+                    flex
+                    justify-between
+                    items-center
                 ">
 
-                    <span class="text-white font-medium">
-                        ${cluster.zone}
+                    <span class="text-gray-300">
+                        ${cluster.zone || "Zone"}
                     </span>
 
                     <span class="
-                        px-2 py-1 rounded-full
+                        px-3
+                        py-1
+                        rounded-full
                         text-xs
-                        bg-${color}-500/20
-                        text-${color}-400
+                        ${badgeClass}
                     ">
-                        ${cluster.risk}
+                        ${cluster.risk || "Unknown"}
                     </span>
 
                 </div>
 
-            </div>
-        `;
-    });
+            `;
+        }
+    );
 }
-            // =========================
-            // 🔹 RISK METER
-            // =========================
-            const riskCircle =
-                document.getElementById(
-                    "risk-progress"
-                );
+// ============================================================
+// GET SELECTED LOCATION
+// (shared priority order — matches risk.js / advisory.js / biodiversity.js)
+// ============================================================
 
-            if (riskCircle) {
+function getSelectedLocation() {
 
-                const radius = 70;
+    if (
+        typeof window.selectedLocation !== "undefined" &&
+        window.selectedLocation
+    ) {
+        return String(window.selectedLocation).toLowerCase().trim();
+    }
 
-                const circumference =
-                    2 * Math.PI * radius;
+    const storedLocation = localStorage.getItem("selectedLocation");
 
-                const offset =
-                    circumference -
-                    (ocean.riskScore / 100)
-                    * circumference;
+    if (storedLocation) {
+        return storedLocation.toLowerCase().trim();
+    }
 
-                riskCircle.style.strokeDashoffset =
-                    offset;
-            }
+    const locationSelect = getElement("location-select");
 
-        } catch (error) {
+    if (locationSelect && locationSelect.value) {
+        return locationSelect.value.toLowerCase().trim();
+    }
 
-            console.error(
-                "❌ Dashboard Error:",
-                error
+    return "mumbai";
+}
+
+// ============================================================
+// LOAD OCEAN DATA
+// ============================================================
+
+async function loadOceanData() {
+
+    try {
+
+        const location = getSelectedLocation();
+
+        console.log(
+            "🌊 Loading ocean data:",
+            location
+        );
+
+        const url =
+            `${API_BASE}/api/ocean-data?location=${encodeURIComponent(location)}`;
+
+        const response =
+            await fetch(
+                url,
+                {
+                    method: "GET",
+                    cache: "no-store"
+                }
+            );
+
+        console.log(
+            "🌐 Ocean API status:",
+            response.status
+        );
+
+        if (!response.ok) {
+
+            throw new Error(
+                `Ocean API returned HTTP ${response.status}`
             );
         }
-    }
 
-    // =========================
-    // 🔹 DROPDOWN
-    // =========================
-    const locationSelect =
-        document.getElementById(
-            "location-select"
+        const data =
+            await response.json();
+
+        console.log(
+            "🌊 Ocean API response:",
+            data
         );
 
-    if (locationSelect) {
+        if (
+            !data ||
+            !data.data
+        ) {
 
-        locationSelect.addEventListener(
-            "change",
-            loadOceanData
+            throw new Error(
+                "Invalid ocean API response"
+            );
+        }
+
+        const history =
+            Array.isArray(
+                data.history
+            )
+                ? data.history
+                : [];
+
+        // ====================================================
+        // UPDATE CARDS
+        // ====================================================
+
+        updateDashboardCards(
+            data.data,
+            data
         );
+
+        // ====================================================
+        // UPDATE GRAPHS
+        // ====================================================
+
+        updateCharts(
+            history
+        );
+
+        console.log(
+            "✅ Dashboard loaded successfully"
+        );
+
+    } catch (error) {
+
+        console.error(
+            "❌ Dashboard loading error:",
+            error
+        );
+
+        const updateTime =
+            getElement(
+                "update-time"
+            );
+
+        if (updateTime) {
+
+            updateTime.textContent =
+                "Unable to load live data";
+        }
     }
-// =========================
-// 🔹 INIT
-// =========================
-loadOceanData();
+}
 
-// Refresh every 5 minutes
-setInterval(loadOceanData, 5 * 60 * 1000);
+// ============================================================
+// LOCATION CHANGE
+// ============================================================
 
-});
+function setupLocationSelector() {
+
+    const selector =
+        getElement("location-select");
+
+    if (!selector) {
+
+        console.warn(
+            "⚠️ location-select not found"
+        );
+
+        return;
+    }
+
+    selector.addEventListener(
+        "change",
+        async function () {
+
+            const location = this.value.toLowerCase().trim();
+
+            window.selectedLocation = location;
+            localStorage.setItem("selectedLocation", location);
+
+            console.log("📍 Location changed:", location);
+
+            await loadOceanData();
+        }
+    );
+}
+
+// ============================================================
+// LIVE CLOCK
+// ============================================================
+
+function startClock() {
+
+    const clock =
+        getElement(
+            "live-clock"
+        );
+
+    if (!clock) {
+        return;
+    }
+
+    function updateClock() {
+
+        const now =
+            new Date();
+
+        clock.textContent =
+            now.toLocaleTimeString(
+                "en-IN",
+                {
+                    hour12: false
+                }
+            );
+    }
+
+    updateClock();
+
+    setInterval(
+        updateClock,
+        1000
+    );
+}
+
+// ============================================================
+// INITIALIZE DASHBOARD
+// ============================================================
+
+async function initializeDashboard() {
+
+    console.log(
+        "🚀 Initializing MarineSense dashboard..."
+    );
+
+    initializeCharts();
+
+    setupLocationSelector();
+
+    startClock();
+
+    await loadOceanData();
+
+}
+
+// ============================================================
+// DOM READY
+// ============================================================
+
+if (
+    document.readyState === "loading"
+) {
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        initializeDashboard
+    );
+
+} else {
+
+    initializeDashboard();
+
+}
+
+// ============================================================
+// OPTIONAL GLOBAL ACCESS
+// ============================================================
+
+window.loadOceanData =
+    loadOceanData;
+
+window.initializeDashboard =
+    initializeDashboard;
