@@ -21,6 +21,13 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import copernicusmarine
 import threading
 
+from pymongo import MongoClient
+from bson import ObjectId
+from dotenv import load_dotenv
+import bcrypt
+import jwt
+from pydantic import BaseModel
+
 # ============================================================
 # APP
 # ============================================================
@@ -44,6 +51,159 @@ def _get_lock(cache_key):
         _cache_locks[cache_key] = threading.Lock()
     return _cache_locks[cache_key]
 
+# ============================================================
+# MONGODB CONNECTION
+# ============================================================
+load_dotenv()
+
+MONGODB_URI = os.getenv("MONGODB_URI")
+JWT_SECRET = os.getenv("JWT_SECRET")
+
+mongo_client = MongoClient(MONGODB_URI)
+
+db = mongo_client["marinesense"]
+users_collection = db["users"]
+
+users_collection.create_index(
+    "username",
+    unique=True
+)
+
+    # -----------------------------
+    # SIGNUP AND LOGIN
+    # -----------------------------
+class SignupRequest(BaseModel):
+    name: str
+    username: str
+    profession: str
+    location: str
+    password: str
+
+
+@app.post("/api/auth/signup")
+def signup(user: SignupRequest):
+
+    username = user.username.strip().lower()
+
+    existing_user = users_collection.find_one({
+        "username": username
+    })
+
+    if existing_user:
+        return {
+            "status": "error",
+            "message": "Username already exists"
+        }
+
+    # -----------------------------
+    # FIND SUPPORTED PORT
+    # -----------------------------
+
+    location_input = user.location.strip().lower()
+
+    selected_port = None
+
+    for port_key, port_data in locations.items():
+
+        if (
+            location_input == port_key
+            or location_input == port_data["name"].lower()
+            or port_key in location_input
+        ):
+            selected_port = port_key
+            break
+
+    # -----------------------------
+    # DEFAULT TO MUMBAI
+    # -----------------------------
+
+    if selected_port is None:
+        selected_port = "mumbai"
+
+    port_data = locations[selected_port]
+
+    # -----------------------------
+    # HASH PASSWORD
+    # -----------------------------
+
+    password_hash = bcrypt.hashpw(
+        user.password.encode("utf-8"),
+        bcrypt.gensalt()
+    ).decode("utf-8")
+
+    # -----------------------------
+    # SAVE USER
+    # -----------------------------
+
+    users_collection.insert_one({
+        "name": user.name.strip(),
+        "username": username,
+        "profession": user.profession.strip(),
+        "port": selected_port,
+        "portName": port_data["name"],
+        "passwordHash": password_hash,
+        "createdAt": datetime.utcnow()
+    })
+
+    return {
+        "status": "success",
+        "message": "Account created successfully",
+        "port": selected_port,
+        "portName": port_data["name"]
+    }
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/login")
+def login(user: LoginRequest):
+
+    username = user.username.strip().lower()
+
+    db_user = users_collection.find_one({
+        "username": username
+    })
+
+    if not db_user:
+        return {
+            "status": "error",
+            "message": "Invalid username or password"
+        }
+
+    password_valid = bcrypt.checkpw(
+        user.password.encode("utf-8"),
+        db_user["passwordHash"].encode("utf-8")
+    )
+
+    if not password_valid:
+        return {
+            "status": "error",
+            "message": "Invalid username or password"
+        }
+
+    token = jwt.encode(
+        {
+            "user_id": str(db_user["_id"]),
+            "username": db_user["username"]
+        },
+        JWT_SECRET,
+        algorithm="HS256"
+    )
+
+    return {
+        "status": "success",
+        "token": token,
+        "user": {
+            "name": db_user["name"],
+            "username": db_user["username"],
+            "profession": db_user["profession"],
+            "port": db_user["port"],
+            "portName": db_user["portName"]
+        }
+    }
 # ============================================================
 # SAFE FLOAT
 # ============================================================
@@ -81,6 +241,14 @@ app.add_middleware(
 CACHE_DURATION_SECONDS = 1200
 _sea_data_cache = {}
 SEA_DATA_CACHE_SECONDS = 1200
+
+# Dashboard response cache: 3 minutes per port
+DASHBOARD_CACHE_SECONDS = 180
+_dashboard_cache = {}
+_dashboard_cache_lock = threading.Lock()
+
+# Separate pool for parallel dashboard data retrieval
+_dashboard_executor = ThreadPoolExecutor(max_workers=3)
 
 # ============================================================
 # LOCATIONS / PORTS
@@ -212,6 +380,15 @@ _sea_level_cache = {}
 _salinity_cache = {}
 _current_cache = {}
 
+# Sea-level cache and failure cooldown
+_sea_level_cache = {}
+_sea_level_retry_after = {}
+_sea_level_state_lock = threading.Lock()
+
+# Avoid repeatedly launching slow Copernicus requests for the same port.
+SEA_LEVEL_FAILURE_COOLDOWN_SECONDS = 90
+SEA_LEVEL_REQUEST_TIMEOUT_SECONDS = 20
+
 
 # ============================================================
 # COPERNICUS SALINITY
@@ -303,7 +480,6 @@ def get_copernicus_salinity(lat, lon):
 
         return 35.0
 
-
 # ============================================================
 # COPERNICUS OCEAN CURRENT
 # ============================================================
@@ -314,150 +490,243 @@ def get_copernicus_current(lat, lon):
     lon = round(lon, 2)
 
     cache_key = f"{lat},{lon}"
-
     now = time.time()
 
+    # --------------------------------------------------------
+    # 1. CHECK CACHE
+    # --------------------------------------------------------
     if cache_key in _current_cache:
-
         cached_value, cached_time = _current_cache[cache_key]
 
         if now - cached_time < CACHE_DURATION_SECONDS:
             return cached_value
 
-    try:
+    with _get_lock("current_" + cache_key):
 
-        date = "2026-07-14"
-
-        current_ds = copernicusmarine.open_dataset(
-            dataset_id="cmems_mod_glo_phy-cur_anfc_0.083deg_PT6H-i",
-            minimum_longitude=lon - 0.5,
-            maximum_longitude=lon + 0.5,
-            minimum_latitude=lat - 0.5,
-            maximum_latitude=lat + 0.5,
-            start_datetime=date,
-            end_datetime=date,
-            variables=["uo", "vo"]
-        )
-
-        uo_field = current_ds["uo"]
-        vo_field = current_ds["vo"]
-
-        if "time" in uo_field.dims:
-            uo_field = uo_field.isel(time=0)
-        if "time" in vo_field.dims:
-            vo_field = vo_field.isel(time=0)
-        if "depth" in uo_field.dims:
-            uo_field = uo_field.isel(depth=0)
-        if "depth" in vo_field.dims:
-            vo_field = vo_field.isel(depth=0)
-
-        try:
-            uo_value = safe_float(
-                uo_field.sel(latitude=lat, longitude=lon, method="nearest").values.flat[0],
-                float("nan")
-            )
-            vo_value = safe_float(
-                vo_field.sel(latitude=lat, longitude=lon, method="nearest").values.flat[0],
-                float("nan")
-            )
-        except Exception:
-            uo_value = float("nan")
-            vo_value = float("nan")
-
-        # If the port point is land/zero-current, use the closest valid ocean cell.
-        if (not math.isfinite(uo_value) or not math.isfinite(vo_value) or
-                (abs(uo_value) < 1e-9 and abs(vo_value) < 1e-9)):
-            try:
-                lats = uo_field["latitude"].values
-                lons = uo_field["longitude"].values
-                uo_values = uo_field.values
-                vo_values = vo_field.values
-                best = None
-                for i, grid_lat in enumerate(lats):
-                    for j, grid_lon in enumerate(lons):
-                        u = safe_float(uo_values[i, j], float("nan"))
-                        v = safe_float(vo_values[i, j], float("nan"))
-                        if not math.isfinite(u) or not math.isfinite(v):
-                            continue
-                        magnitude = math.sqrt(u * u + v * v)
-                        if magnitude < 1e-9:
-                            continue
-                        distance = (float(grid_lat) - lat) ** 2 + (float(grid_lon) - lon) ** 2
-                        if best is None or distance < best[0]:
-                            best = (distance, u, v, float(grid_lat), float(grid_lon))
-                if best is not None:
-                    uo_value = best[1]
-                    vo_value = best[2]
-                    print("Ocean current fallback grid:", best[3], best[4])
-            except Exception as fallback_error:
-                print("Ocean current fallback search error:", fallback_error)
-
-        if not math.isfinite(uo_value):
-            uo_value = 0.0
-        if not math.isfinite(vo_value):
-            vo_value = 0.0
-
-        velocity = math.sqrt(
-            uo_value ** 2 +
-            vo_value ** 2
-        )
-
-        direction = (
-            math.degrees(
-                math.atan2(
-                    uo_value,
-                    vo_value
-                )
-            ) + 360
-        ) % 360
-
-        result = {
-
-            "velocity":
-                round(velocity, 2),
-
-            "direction":
-                round(direction, 1),
-
-            "uo":
-                round(uo_value, 3),
-
-            "vo":
-                round(vo_value, 3)
-        }
-
-        print(
-            "Ocean current:",
-            lat,
-            lon,
-            result
-        )
-
-        _current_cache[cache_key] = (
-            result,
-            now
-        )
-
-        return result
-
-    except Exception as e:
-
-        print(
-            "Current Error:",
-            e
-        )
+        # Recheck cache after acquiring lock
+        now = time.time()
 
         if cache_key in _current_cache:
-            return _current_cache[cache_key][0]
+            cached_value, cached_time = _current_cache[cache_key]
 
-        return {
+            if now - cached_time < CACHE_DURATION_SECONDS:
+                return cached_value
 
-            "velocity": 0.0,
-            "direction": 0.0,
-            "uo": 0.0,
-            "vo": 0.0
-        }
+        try:
+            # ------------------------------------------------
+            # 2. REQUEST COPERNICUS DATA
+            # ------------------------------------------------
+            from datetime import datetime, timedelta
 
+            date = (
+                datetime.utcnow() - timedelta(days=1)
+            ).strftime("%Y-%m-%d")
+
+            current_ds = _run_with_timeout(
+                copernicusmarine.open_dataset,
+                dataset_id="cmems_mod_glo_phy-cur_anfc_0.083deg_PT6H-i",
+                minimum_longitude=lon - 0.5,
+                maximum_longitude=lon + 0.5,
+                minimum_latitude=lat - 0.5,
+                maximum_latitude=lat + 0.5,
+                start_datetime=date,
+                end_datetime=date,
+                variables=["uo", "vo"]
+            )
+
+            # ------------------------------------------------
+            # 3. VALIDATE DATASET
+            # ------------------------------------------------
+            if (
+                current_ds is None
+                or "uo" not in current_ds
+                or "vo" not in current_ds
+            ):
+                raise ValueError(
+                    "Copernicus dataset is missing uo or vo"
+                )
+
+            uo_field = current_ds["uo"]
+            vo_field = current_ds["vo"]
+
+            # Select a time step
+            if "time" in uo_field.dims:
+                if uo_field.sizes["time"] == 0:
+                    raise ValueError("No ocean-current time values")
+                uo_field = uo_field.isel(time=0)
+
+            if "time" in vo_field.dims:
+                if vo_field.sizes["time"] == 0:
+                    raise ValueError("No ocean-current time values")
+                vo_field = vo_field.isel(time=0)
+
+            # Select surface depth
+            if "depth" in uo_field.dims:
+                uo_field = uo_field.isel(depth=0)
+
+            if "depth" in vo_field.dims:
+                vo_field = vo_field.isel(depth=0)
+
+            # ------------------------------------------------
+            # 4. READ NEAREST GRID CELL
+            # ------------------------------------------------
+            try:
+                uo_value = safe_float(
+                    uo_field.sel(
+                        latitude=lat,
+                        longitude=lon,
+                        method="nearest"
+                    ).values.flat[0],
+                    float("nan")
+                )
+
+                vo_value = safe_float(
+                    vo_field.sel(
+                        latitude=lat,
+                        longitude=lon,
+                        method="nearest"
+                    ).values.flat[0],
+                    float("nan")
+                )
+
+            except Exception as lookup_error:
+                print("Current grid lookup failed:", lookup_error)
+                uo_value = float("nan")
+                vo_value = float("nan")
+
+            # ------------------------------------------------
+            # 5. SEARCH NEARBY CELLS IF DATA IS MISSING
+            # ------------------------------------------------
+            # Zero current can be valid. Search nearby cells
+            # only when the nearest cell contains missing data.
+            if (
+                not math.isfinite(uo_value)
+                or not math.isfinite(vo_value)
+            ):
+                try:
+                    lats = uo_field["latitude"].values
+                    lons = uo_field["longitude"].values
+                    uo_values = uo_field.values
+                    vo_values = vo_field.values
+
+                    best = None
+
+                    for i, grid_lat in enumerate(lats):
+                        for j, grid_lon in enumerate(lons):
+
+                            u = safe_float(
+                                uo_values[i, j],
+                                float("nan")
+                            )
+                            v = safe_float(
+                                vo_values[i, j],
+                                float("nan")
+                            )
+
+                            if (
+                                not math.isfinite(u)
+                                or not math.isfinite(v)
+                            ):
+                                continue
+
+                            distance = (
+                                (float(grid_lat) - lat) ** 2
+                                + (float(grid_lon) - lon) ** 2
+                            )
+
+                            if best is None or distance < best[0]:
+                                best = (
+                                    distance,
+                                    u,
+                                    v,
+                                    float(grid_lat),
+                                    float(grid_lon)
+                                )
+
+                    if best is None:
+                        raise ValueError(
+                            "No valid ocean-current grid cells found"
+                        )
+
+                    uo_value = best[1]
+                    vo_value = best[2]
+
+                    print(
+                        "Ocean current fallback grid:",
+                        best[3],
+                        best[4]
+                    )
+
+                except Exception as fallback_error:
+                    print("Current fallback search failed:", fallback_error)
+                    return None
+
+            # ------------------------------------------------
+            # 6. NEVER CONVERT MISSING DATA TO ZERO
+            # ------------------------------------------------
+            if (
+                not math.isfinite(uo_value)
+                or not math.isfinite(vo_value)
+            ):
+                print(
+                    "Ocean current unavailable:",
+                    lat,
+                    lon
+                )
+                return None
+
+            # ------------------------------------------------
+            # 7. CALCULATE SPEED AND DIRECTION
+            # ------------------------------------------------
+            velocity = math.sqrt(
+                uo_value ** 2 + vo_value ** 2
+            )
+
+            direction = (
+                math.degrees(
+                    math.atan2(uo_value, vo_value)
+                ) + 360
+            ) % 360
+
+            result = {
+                "velocity": round(velocity, 3),
+                "direction": round(direction, 1),
+                "uo": round(uo_value, 4),
+                "vo": round(vo_value, 4)
+            }
+
+            print(
+                "Ocean current:",
+                lat,
+                lon,
+                result
+            )
+
+            # Cache only valid measurements
+            _current_cache[cache_key] = (
+                result,
+                time.time()
+            )
+
+            return result
+
+        except Exception as e:
+            print(
+                "Current Error:",
+                lat,
+                lon,
+                str(e)
+            )
+
+            # Use a previous cached measurement if available
+            if cache_key in _current_cache:
+                cached_value, cached_time = _current_cache[cache_key]
+
+                if cached_value is not None:
+                    print("Using previously cached current:", cached_value)
+                    return cached_value
+
+            return None
 # ============================================================
 # OPEN METEO
 # LAST 4 HOURLY POINTS
@@ -930,139 +1199,293 @@ def get_sea_data(lat, lon):
                 "history": []
             }
 
+
 # ============================================================
-# COPERNICUS SEA LEVEL
+# COPERNICUS SEA LEVEL — CACHED AND TIMEOUT-SAFE
 # ============================================================
 
 def get_copernicus_sea_level(lat, lon):
+    from datetime import datetime, timedelta
 
-    lat = round(lat, 2)
-    lon = round(lon, 2)
-
+    lat = round(float(lat), 2)
+    lon = round(float(lon), 2)
     cache_key = f"{lat},{lon}"
-
     now = time.time()
 
-    if cache_key in _sea_level_cache:
-        cached_value, cached_time = _sea_level_cache[cache_key]
-        if now - cached_time < CACHE_DURATION_SECONDS:
-            return cached_value
+    # --------------------------------------------------------
+    # 1. CHECK CACHE AND FAILURE COOLDOWN
+    # --------------------------------------------------------
+    with _sea_level_state_lock:
+        cached = _sea_level_cache.get(cache_key)
 
-    with _get_lock(cache_key):
+        if cached is not None:
+            cached_value, cached_time = cached
 
-        # Re-check cache after acquiring the lock — another thread
-        # may have just finished fetching this while we were waiting.
-        now = time.time()
-
-        if cache_key in _sea_level_cache:
-            cached_value, cached_time = _sea_level_cache[cache_key]
             if now - cached_time < CACHE_DURATION_SECONDS:
                 return cached_value
 
+        retry_after = _sea_level_retry_after.get(cache_key, 0)
+
+        if now < retry_after:
+            # Do not repeatedly hit Copernicus during an outage.
+            # Return a previous valid measurement if available.
+            if cached is not None:
+                print(
+                    "Sea level: using stale cached measurement",
+                    cache_key,
+                )
+                return cached[0]
+
+            print("Sea level: request cooldown active", cache_key)
+            return None
+
+    # One lock per sea-level location prevents simultaneous calls
+    # for the same coordinates.
+    with _get_lock("sea_level_" + cache_key):
+
+        now = time.time()
+
+        with _sea_level_state_lock:
+            cached = _sea_level_cache.get(cache_key)
+
+            if cached is not None:
+                cached_value, cached_time = cached
+
+                if now - cached_time < CACHE_DURATION_SECONDS:
+                    return cached_value
+
+            retry_after = _sea_level_retry_after.get(cache_key, 0)
+
+            if now < retry_after:
+                if cached is not None:
+                    return cached[0]
+                return None
+
         try:
+            # ------------------------------------------------
+            # 2. REQUEST A RECENT DAILY DATASET
+            # ------------------------------------------------
+            date = (
+                datetime.utcnow() - timedelta(days=1)
+            ).strftime("%Y-%m-%d")
 
-            date = "2026-07-14"
-
-            # Wider search area prevents coastal port coordinates from landing on a land cell.
-            sealevel_ds = _run_with_timeout(
+            # Smaller bounding box reduces unnecessary data transfer.
+            dataset = _run_with_timeout(
                 copernicusmarine.open_dataset,
                 dataset_id="cmems_mod_glo_phy_anfc_0.083deg_P1D-m",
-                minimum_longitude=lon - 0.5,
-                maximum_longitude=lon + 0.5,
-                minimum_latitude=lat - 0.5,
-                maximum_latitude=lat + 0.5,
+                minimum_longitude=lon - 0.15,
+                maximum_longitude=lon + 0.15,
+                minimum_latitude=lat - 0.15,
+                maximum_latitude=lat + 0.15,
                 start_datetime=date,
                 end_datetime=date,
-                variables=["zos"]
+                variables=["zos"],
+                timeout=SEA_LEVEL_REQUEST_TIMEOUT_SECONDS,
             )
 
-            field = sealevel_ds["zos"]
-            if "time" in field.dims:
-                field = field.isel(time=0)
+            if dataset is None or "zos" not in dataset:
+                raise ValueError("Copernicus dataset has no 'zos' variable")
+
+            field = dataset["zos"]
+
+            # ------------------------------------------------
+            # 3. SELECT THE FIRST AVAILABLE TIME/DEPTH
+            # ------------------------------------------------
+            for dim in ("time", "depth"):
+                if dim in field.dims:
+                    if field.sizes.get(dim, 0) == 0:
+                        raise ValueError(f"Dataset has no {dim} values")
+                    field = field.isel({dim: 0})
+
+            # ------------------------------------------------
+            # 4. FIND THE NEAREST GRID CELL
+            # ------------------------------------------------
+            value = float("nan")
 
             try:
                 nearest = field.sel(
                     latitude=lat,
                     longitude=lon,
-                    method="nearest"
+                    method="nearest",
                 )
-                value = safe_float(nearest.values.flat[0], float("nan"))
-            except Exception:
-                value = float("nan")
 
-            # If the port point is land/zero, use the closest valid ocean grid cell.
-            if not math.isfinite(value) or abs(value) < 1e-12:
-                try:
-                    lats = field["latitude"].values
-                    lons = field["longitude"].values
-                    values = field.values
-                    best = None
-                    for i, grid_lat in enumerate(lats):
-                        for j, grid_lon in enumerate(lons):
-                            candidate = safe_float(values[i, j], float("nan"))
-                            if not math.isfinite(candidate) or abs(candidate) < 1e-12:
-                                continue
-                            distance = (float(grid_lat) - lat) ** 2 + (float(grid_lon) - lon) ** 2
-                            if best is None or distance < best[0]:
-                                best = (distance, candidate, float(grid_lat), float(grid_lon))
-                    if best is not None:
-                        value = best[1]
-                        print("Sea level fallback grid:", best[2], best[3])
-                except Exception as fallback_error:
-                    print("Sea level fallback search error:", fallback_error)
+                raw = nearest.values
+                if getattr(raw, "size", 0) > 0:
+                    candidate = float(raw.flat[0])
+                    if math.isfinite(candidate):
+                        value = candidate
 
+            except Exception as lookup_error:
+                print("Sea-level nearest lookup:", repr(lookup_error))
+
+            # ------------------------------------------------
+            # 5. FALL BACK TO THE NEAREST VALID CELL
+            # ------------------------------------------------
+            # Zero is a valid possible sea-level anomaly.
             if not math.isfinite(value):
-                value = 0.0
+                try:
+                    import numpy as np
 
-            value = round(value, 2)
+                    grid = field
+                    grid_values = np.asarray(grid.values, dtype=float)
 
-            print(
-                "Sea level:",
-                lat,
-                lon,
-                value
-            )
+                    # Support any remaining singleton dimensions.
+                    grid_values = np.squeeze(grid_values)
 
-            _sea_level_cache[cache_key] = (
-                value,
-                now
-            )
+                    if grid_values.ndim != 2:
+                        raise ValueError(
+                            "Expected a 2D latitude/longitude grid; "
+                            f"received shape {grid_values.shape}"
+                        )
 
+                    lats = np.asarray(
+                        grid["latitude"].values, dtype=float
+                    )
+                    lons = np.asarray(
+                        grid["longitude"].values, dtype=float
+                    )
+
+                    # Handle descending coordinates and either
+                    # one-dimensional or two-dimensional coordinates.
+                    if lats.ndim == 1 and lons.ndim == 1:
+                        lat_grid, lon_grid = np.meshgrid(lats, lons, indexing="ij")
+                    else:
+                        lat_grid, lon_grid = lats, lons
+
+                    valid = np.isfinite(grid_values)
+
+                    # Only search cells in the requested small region.
+                    nearby = (
+                        (np.abs(lat_grid - lat) <= 0.15)
+                        & (np.abs(lon_grid - lon) <= 0.15)
+                        & valid
+                    )
+
+                    if not np.any(nearby):
+                        raise ValueError(
+                            "No valid sea-level cells near selected port"
+                        )
+
+                    # Approximate geographic distance; scale longitude
+                    # by latitude so the nearest cell is more meaningful.
+                    distance = (
+                        (lat_grid - lat) ** 2
+                        + (
+                            (lon_grid - lon)
+                            * math.cos(math.radians(lat))
+                        ) ** 2
+                    )
+
+                    distance = np.where(nearby, distance, np.inf)
+                    nearest_index = np.unravel_index(
+                        np.argmin(distance), distance.shape
+                    )
+
+                    value = float(grid_values[nearest_index])
+
+                    print(
+                        "Sea-level fallback grid:",
+                        float(lat_grid[nearest_index]),
+                        float(lon_grid[nearest_index]),
+                    )
+
+                except Exception as fallback_error:
+                    print(
+                        "Sea-level fallback failed:",
+                        repr(fallback_error),
+                    )
+                    value = float("nan")
+
+            # ------------------------------------------------
+            # 6. VALIDATE AND CACHE ONLY REAL MEASUREMENTS
+            # ------------------------------------------------
+            if not math.isfinite(value):
+                raise ValueError("No finite sea-level measurement found")
+
+            value = round(value, 3)
+
+            with _sea_level_state_lock:
+                _sea_level_cache[cache_key] = (value, time.time())
+                _sea_level_retry_after.pop(cache_key, None)
+
+            print("Sea level:", lat, lon, value, "m")
             return value
 
-        except Exception as e:
+        except Exception as error:
+            print("Sea Level Error:", lat, lon, repr(error))
 
-            print(
-                "Sea Level Error:",
-                e
-            )
+            with _sea_level_state_lock:
+                _sea_level_retry_after[cache_key] = (
+                    time.time() + SEA_LEVEL_FAILURE_COOLDOWN_SECONDS
+                )
 
-            if cache_key in _sea_level_cache:
-                return _sea_level_cache[cache_key][0]
+                cached = _sea_level_cache.get(cache_key)
 
-            return 0.0 
+            # A stale valid reading is better than a fabricated zero,
+            # but the frontend should ideally label it as stale.
+            if cached is not None:
+                print("Sea level: returning previous valid value", cache_key)
+                return cached[0]
 
-
+            return None
+        
 # ========================================================
 # 4. COPERNICUS (run in parallel instead of sequentially)
 # ========================================================
+    sea_level_future = _dashboard_executor.submit(
+        get_copernicus_sea_level,
+        coords["lat"],
+        coords["lon"]
+    )
 
-    sea_level_future = _copernicus_executor.submit(
-    get_copernicus_sea_level, coords["lat"], coords["lon"]
-)
-    salinity_future = _copernicus_executor.submit(
-    get_copernicus_salinity, coords["lat"], coords["lon"]
-)
-    current_future = _copernicus_executor.submit(
-    get_copernicus_current, coords["lat"], coords["lon"]
-)
+    salinity_future = _dashboard_executor.submit(
+        get_copernicus_salinity,
+        coords["lat"],
+        coords["lon"]
+    )
 
-    sea_level = safe_float(sea_level_future.result(), 0.0)
-    salinity = safe_float(salinity_future.result(), 35.0)
-    current = current_future.result()
+    current_future = _dashboard_executor.submit(
+        get_copernicus_current,
+        coords["lat"],
+        coords["lon"]
+    )
+
+    # Each getter should return its existing fallback if its
+    # upstream request fails. The timeout prevents this endpoint
+    # from waiting indefinitely for a result.
+    try:
+        sea_level = safe_float(
+            sea_level_future.result(timeout=35),
+            0.0
+        )
+    except Exception as exc:
+        print("Dashboard sea-level timeout/error:", exc)
+        sea_level = 0.0
+
+    try:
+        salinity = safe_float(
+            salinity_future.result(timeout=35),
+            35.0
+        )
+    except Exception as exc:
+        print("Dashboard salinity timeout/error:", exc)
+        salinity = 35.0
+
+    try:
+        current = current_future.result(timeout=35)
+        current = current if isinstance(current, dict) else {}
+    except Exception as exc:
+        print("Dashboard current timeout/error:", exc)
+        current = {
+            "velocity": 0.0,
+            "direction": 0.0,
+            "uo": 0.0,
+            "vo": 0.0
+        }
 
     current_velocity = safe_float(current.get("velocity"), 0.0)
     current_direction = safe_float(current.get("direction"), 0.0)
+
 
 # ============================================================
 # RISK CALCULATION
@@ -1103,22 +1526,19 @@ def calculate_risk(
         100
     )
 
-
 # ============================================================
 # OCEAN DATA API
 # ============================================================
 
 @app.get("/api/ocean-data")
-def ocean_data(
-    location: str = "mumbai"
-):
+def ocean_data(location: str = "mumbai"):
+
     global active_location
 
-    location = (
-        location
-        .lower()
-        .strip()
-    )
+    # --------------------------------------------------------
+    # 1. VALIDATE SELECTED PORT
+    # --------------------------------------------------------
+    location = (location or "mumbai").lower().strip()
 
     if location not in locations:
         location = "mumbai"
@@ -1126,10 +1546,133 @@ def ocean_data(
     active_location = location
     coords = locations[location]
 
+    now = time.time()
+
+    # --------------------------------------------------------
+    # 2. CHECK DASHBOARD CACHE
+    # --------------------------------------------------------
+    with _dashboard_cache_lock:
+        cached = _dashboard_cache.get(location)
+
+        if cached and now - cached["time"] < DASHBOARD_CACHE_SECONDS:
+            print("Using dashboard cache:", location)
+            return cached["response"]
+
     print("================================")
     print("Selected Port:", coords["name"])
     print("Latitude:", coords["lat"])
     print("Longitude:", coords["lon"])
+
+    # --------------------------------------------------------
+    # 3. MARINE AND WEATHER DATA
+    # --------------------------------------------------------
+    sea = get_sea_data(coords["lat"], coords["lon"])
+
+    temperature = sea.get("temperature")
+    wave_height = sea.get("wave_height")
+    wind_speed = sea.get("wind_speed")
+
+    # --------------------------------------------------------
+    # 4. COPERNICUS SEA LEVEL
+    # --------------------------------------------------------
+    sea_level = get_copernicus_sea_level(
+        coords["lat"],
+        coords["lon"]
+    )
+
+    # --------------------------------------------------------
+    # 5. COPERNICUS SALINITY
+    # --------------------------------------------------------
+    salinity = get_copernicus_salinity(
+        coords["lat"],
+        coords["lon"]
+    )
+
+    # --------------------------------------------------------
+    # 6. COPERNICUS OCEAN CURRENT
+    # --------------------------------------------------------
+    current = get_copernicus_current(
+        coords["lat"],
+        coords["lon"]
+    )
+
+    current_velocity = (
+        current.get("velocity")
+        if current is not None
+        else None
+    )
+
+    current_direction = (
+        current.get("direction")
+        if current is not None
+        else None
+    )
+
+    # --------------------------------------------------------
+    # 7. RISK CALCULATION
+    # --------------------------------------------------------
+    # Use zero only internally when current is unavailable.
+    # Keep the API measurement itself as None.
+    risk_current = (
+        current_velocity
+        if current_velocity is not None
+        else 0.0
+    )
+
+    risk_temperature = (
+        temperature if temperature is not None else 28.0
+    )
+
+    risk_score = calculate_risk(
+        risk_temperature,
+        risk_current
+    )
+
+    if risk_score < 30:
+        risk_level = "Low"
+    elif risk_score < 70:
+        risk_level = "Medium"
+    else:
+        risk_level = "High"
+
+    # --------------------------------------------------------
+    # 8. BUILD RESPONSE
+    # --------------------------------------------------------
+    response = {
+        "status": "success",
+        "location": location,
+        "locationName": coords["name"],
+        "coordinates": {
+            "lat": coords["lat"],
+            "lon": coords["lon"]
+        },
+        "temperature": temperature,
+        "waveHeight": wave_height,
+        "windSpeed": wind_speed,
+        "seaLevel": sea_level,
+        "salinity": salinity,
+        "currentVelocity": current_velocity,
+        "currentDirection": current_direction,
+        "riskScore": risk_score,
+        "riskLevel": risk_level,
+        "history": sea.get("history", [])
+    }
+
+    # --------------------------------------------------------
+    # 9. CACHE RESPONSE BY PORT
+    # --------------------------------------------------------
+    with _dashboard_cache_lock:
+        _dashboard_cache[location] = {
+            "time": time.time(),
+            "response": response
+        }
+
+    print("Ocean data response:", location)
+    print("Sea level:", sea_level)
+    print("Current velocity:", current_velocity)
+    print("Current direction:", current_direction)
+
+    return response
 
     # ========================================================
     # 3. OPEN METEO
@@ -1577,14 +2120,21 @@ def ocean_data(
     )
 
 
+    
+    with _dashboard_cache_lock:
+        _dashboard_cache[location] = {
+        "time": time.time(),
+        "response": response
+    }
+
     return response
 
 # ============================================================
 # ADVISORY API
 # ============================================================
+
 @app.get("/api/advisory")
 def advisory(location: Optional[str] = None):
-
     try:
         global active_location
 
@@ -1599,441 +2149,208 @@ def advisory(location: Optional[str] = None):
         if location not in locations:
             location = active_location
 
-        # Save selected location
         active_location = location
-
-        # Get selected port coordinates
         coords = locations[location]
 
         print("======================================")
         print("ADVISORY PORT:", location)
-        print(
-            "ADVISORY COORDINATES:",
-            coords["lat"],
-            coords["lon"]
-        )
+        print("ADVISORY COORDINATES:", coords["lat"], coords["lon"])
+
+        # ----------------------------------------------------
+        # HELPER: PRESERVE UNAVAILABLE VALUES AS NONE
+        # ----------------------------------------------------
+        def advisory_number(value):
+            if value is None:
+                return None
+
+            try:
+                number = float(value)
+                if not math.isfinite(number):
+                    return None
+                return number
+            except (TypeError, ValueError):
+                return None
 
         # ----------------------------------------------------
         # MARINE DATA
         # ----------------------------------------------------
-        sea = get_sea_data(
-            coords["lat"],
-            coords["lon"]
-        )
+        sea = get_sea_data(coords["lat"], coords["lon"]) or {}
 
-        temperature = safe_float(
-            sea.get("temperature"),
-            28.0
-        )
-
-        wave_height = safe_float(
-            sea.get("wave_height"),
-            1.0
-        )
+        temperature = advisory_number(sea.get("temperature"))
+        wave_height = advisory_number(sea.get("wave_height"))
 
         # ----------------------------------------------------
         # SEA LEVEL
         # ----------------------------------------------------
-        sea_level = safe_float(
-            get_copernicus_sea_level(
-                coords["lat"],
-                coords["lon"]
-            ),
-            0.0
+        sea_level = advisory_number(
+            get_copernicus_sea_level(coords["lat"], coords["lon"])
         )
 
         # ----------------------------------------------------
         # SALINITY
         # ----------------------------------------------------
-        salinity = safe_float(
-            get_copernicus_salinity(
-                coords["lat"],
-                coords["lon"]
-            ),
-            35.0
+        salinity = advisory_number(
+            get_copernicus_salinity(coords["lat"], coords["lon"])
         )
 
         # ----------------------------------------------------
         # OCEAN CURRENT
         # ----------------------------------------------------
         current = get_copernicus_current(
-            coords["lat"],
-            coords["lon"]
+            coords["lat"], coords["lon"]
         )
 
-        current_velocity = safe_float(
-            current.get("velocity"),
-            0.0
-        )
+        current_velocity = None
+        current_direction = None
 
-        current_direction = safe_float(
-            current.get("direction"),
-            0.0
-        )
+        if isinstance(current, dict):
+            current_velocity = advisory_number(current.get("velocity"))
+            current_direction = advisory_number(current.get("direction"))
 
         # ----------------------------------------------------
         # RISK SCORE
+        # Do not calculate a score using invented fallback values.
         # ----------------------------------------------------
-        risk_score = calculate_risk(
-            temperature,
-            current_velocity
-        )
+        if temperature is not None and current_velocity is not None:
+            risk_score = calculate_risk(temperature, current_velocity)
+        else:
+            risk_score = None
 
         # ----------------------------------------------------
         # ADVISORIES
         # ----------------------------------------------------
         advisories = []
 
-        # High wave activity
-        if wave_height > 2:
-
+        if wave_height is not None and wave_height > 2:
             advisories.append({
                 "type": "Navigation Warning",
-
                 "severity": "High",
-
                 "title": "High Wave Activity",
-
                 "message": (
                     f"Wave turbulence near {coords['name']} "
                     "may affect vessel movement."
                 ),
-
                 "recommendation": (
-                    "Restrict small vessel movement "
-                    "and increase coastal monitoring."
+                    "Restrict small vessel movement and "
+                    "increase coastal monitoring."
                 )
             })
 
-        # Strong ocean current
-        if current_velocity > 1.5:
-
+        if current_velocity is not None and current_velocity > 1.5:
             advisories.append({
                 "type": "Marine Navigation Alert",
-
                 "severity": "Critical",
-
                 "title": "Strong Ocean Current",
-
                 "message": (
-                    f"Ocean current velocity is above "
-                    f"the safe navigation threshold near "
-                    f"{coords['name']}."
+                    f"Ocean current velocity is above the safe "
+                    f"navigation threshold near {coords['name']}."
                 ),
-
                 "recommendation": (
-                    "Increase vessel monitoring "
-                    "and coastal current observation."
+                    "Increase vessel monitoring and coastal "
+                    "current observation."
                 )
             })
 
-        # Elevated sea level
-        if sea_level > 0.5:
-
+        if sea_level is not None and sea_level > 0.5:
             advisories.append({
                 "type": "Coastal Alert",
-
                 "severity": "Medium",
-
                 "title": "Elevated Sea Level",
-
-                "message": (
-                    f"Elevated sea level detected near "
-                    f"{coords['name']}."
-                ),
-
+                "message": f"Elevated sea level detected near {coords['name']}.",
                 "recommendation": (
                     "Monitor coastal erosion and tidal impacts."
                 )
             })
 
-        # Elevated temperature
-        if temperature > 29:
-
+        if temperature is not None and temperature > 29:
             advisories.append({
                 "type": "Thermal Stress",
-
                 "severity": "Medium",
-
                 "title": "Elevated Sea Temperature",
-
                 "message": (
-                    f"Surface water temperature near "
-                    f"{coords['name']} is elevated."
+                    f"Surface water temperature near {coords['name']} "
+                    "is elevated."
                 ),
+                "recommendation": "Track marine habitat fluctuations."
+            })
 
+        # ----------------------------------------------------
+        # DATA QUALITY NOTICE
+        # ----------------------------------------------------
+        unavailable = []
+
+        if temperature is None:
+            unavailable.append("sea temperature")
+        if wave_height is None:
+            unavailable.append("wave height")
+        if sea_level is None:
+            unavailable.append("sea level")
+        if salinity is None:
+            unavailable.append("salinity")
+        if current_velocity is None:
+            unavailable.append("ocean current")
+
+        if unavailable:
+            advisories.append({
+                "type": "Data Quality Notice",
+                "severity": "Medium",
+                "title": "Some Marine Data Unavailable",
+                "message": (
+                    "The following measurements could not be verified: "
+                    + ", ".join(unavailable)
+                    + ". Risk assessment may be incomplete."
+                ),
                 "recommendation": (
-                    "Track marine habitat fluctuations."
+                    "Retry data retrieval and verify the missing "
+                    "measurements before making operational decisions."
                 )
             })
 
-        # No warnings
+        # Only report stable conditions when the measurements used
+        # for the advisory checks are available.
         if not advisories:
-
             advisories.append({
                 "type": "Marine Status",
-
                 "severity": "Low",
-
-                "title": "Stable Marine Conditions",
-
+                "title": "No Threshold-Based Warnings Detected",
                 "message": (
-                    f"{coords['name']} marine conditions "
-                    "remain stable."
+                    f"No configured warning thresholds were exceeded "
+                    f"by the available measurements near {coords['name']}."
                 ),
-
-                "recommendation": (
-                    "Continue routine marine monitoring."
-                )
+                "recommendation": "Continue routine marine monitoring."
             })
 
         # ----------------------------------------------------
         # RESPONSE
+        # Keep the existing field names for frontend compatibility.
         # ----------------------------------------------------
         return {
-
             "status": "success",
-
             "location": location,
-
             "locationName": coords["name"],
-
             "coordinates": {
                 "lat": coords["lat"],
                 "lon": coords["lon"]
             },
-
             "summary": {
-
                 "riskScore": risk_score,
-
                 "waveHeight": wave_height,
-
                 "currentVelocity": current_velocity,
-
                 "currentDirection": current_direction,
-
                 "temperature": temperature,
-
                 "seaLevel": sea_level,
-
                 "salinity": salinity
             },
-
+            "dataComplete": len(unavailable) == 0,
+            "missingData": unavailable,
             "advisories": advisories
         }
 
-    # --------------------------------------------------------
-    # ERROR HANDLING
-    # --------------------------------------------------------
     except Exception as e:
-
-        print("Advisory API Error:", e)
-
+        print("Advisory API Error:", repr(e))
         return {
             "status": "error",
             "message": str(e)
-        }
-# ============================================================
-# DOWNLOADABLE PDF REPORT
-# ============================================================
-
-@app.get("/api/download-report")
-def download_report():
-
-    try:
-
-        coords = locations[
-            "mumbai"
-        ]
-
-        sea = get_sea_data(
-
-            coords["lat"],
-            coords["lon"]
-        )
-
-        temperature = sea[
-            "temperature"
-        ]
-
-        sea_level = get_copernicus_sea_level(
-
-            coords["lat"],
-            coords["lon"]
-        )
-
-        salinity = get_copernicus_salinity(
-
-            coords["lat"],
-            coords["lon"]
-        )
-
-        current = get_copernicus_current(
-
-            coords["lat"],
-            coords["lon"]
-        )
-
-        current_velocity = current[
-            "velocity"
-        ]
-
-        current_direction = current[
-            "direction"
-        ]
-
-        risk_score = calculate_risk(
-
-            temperature,
-            current_velocity
-        )
-
-
-        report_path = (
-            "mumbai_marine_report.pdf"
-        )
-
-
-        doc = SimpleDocTemplate(
-
-            report_path,
-
-            pagesize=letter
-        )
-
-
-        styles = getSampleStyleSheet()
-
-        elements = []
-
-
-        elements.append(
-            Paragraph(
-                "MarineSense — Mumbai Port Advisory Report",
-                styles["Title"]
-            )
-        )
-
-        elements.append(
-            Spacer(
-                1,
-                20
-            )
-        )
-
-
-        report_data = [
-
-            f"Temperature: "
-            f"{temperature:.2f} °C",
-
-            f"Wave Height: "
-            f"{sea['wave_height']:.2f} m",
-
-            f"Wind Speed: "
-            f"{sea['wind_speed']:.2f} km/h",
-
-            f"Sea Level: "
-            f"{sea_level:.2f} m",
-
-            f"Salinity: "
-            f"{salinity:.2f} PSU",
-
-            f"Current Velocity: "
-            f"{current_velocity:.2f} m/s",
-
-            f"Current Direction: "
-            f"{current_direction:.1f}°",
-
-            f"Risk Score: "
-            f"{risk_score}",
-
-            f"Generated: "
-            f"{datetime.utcnow()} UTC"
-        ]
-
-
-        for item in report_data:
-
-            elements.append(
-                Paragraph(
-                    item,
-                    styles["BodyText"]
-                )
-            )
-
-            elements.append(
-                Spacer(
-                    1,
-                    10
-                )
-            )
-
-
-        elements.append(
-            Paragraph(
-                "Recommendations",
-                styles["Heading2"]
-            )
-        )
-
-
-        recommendations = [
-
-            "Increase monitoring of ocean current velocity near coastal biodiversity zones.",
-
-            "Restrict small vessel operations during high wave activity.",
-
-            "Continue sea-level surveillance for Mumbai coastal infrastructure.",
-
-            "Track thermal stress for marine ecosystem conservation."
-        ]
-
-
-        for rec in recommendations:
-
-            elements.append(
-                Paragraph(
-                    f"• {rec}",
-                    styles["BodyText"]
-                )
-            )
-
-            elements.append(
-                Spacer(
-                    1,
-                    6
-                )
-            )
-
-
-        doc.build(
-            elements
-        )
-
-
-        return FileResponse(
-
-            report_path,
-
-            media_type="application/pdf",
-
-            filename=(
-                "Mumbai_Marine_Advisory_Report.pdf"
-            )
-        )
-
-
-    except Exception as e:
-
-        return {
-
-            "status":
-                "error",
-
-            "message":
-                str(e)
         }
 
 # ============================================================
@@ -2112,328 +2429,319 @@ def biodiversity(location: str = "mumbai"):
     except Exception as e:
         print("Biodiversity API Error:", e)
         return {"status": "error", "message": str(e)}
-    
+
 # ============================================================
 # RISK ANALYSIS API
 # ============================================================
+
 @app.get("/api/risk-analysis")
 def risk_analysis(location: Optional[str] = None):
+
+    print("RISK REQUEST LOCATION:", repr(location))
+
     try:
         global active_location
 
         # ----------------------------------------------------
-        # SELECT LOCATION
+        # 1. SELECT LOCATION
         # ----------------------------------------------------
-        if not location:
-            location = active_location
-
-        location = location.lower().strip()
+        location = (location or "mumbai").lower().strip()
 
         if location not in locations:
-            location = active_location
+            print(
+                f"Invalid risk location '{location}', "
+                "defaulting to Mumbai"
+            )
+            location = "mumbai"
 
-        # Save selected location
-        active_location = location
-
-        # Get coordinates
         coords = locations[location]
+        active_location = location
 
         print("======================================")
         print("RISK PORT:", location)
-        print(
-            "RISK COORDINATES:",
-            coords["lat"],
-            coords["lon"]
-        )
+        print("RISK COORDINATES:", coords["lat"], coords["lon"])
 
         # ----------------------------------------------------
-        # MARINE DATA
+        # 2. MARINE DATA
         # ----------------------------------------------------
-        sea = get_sea_data(
-            coords["lat"],
-            coords["lon"]
-        )
+        sea = get_sea_data(coords["lat"], coords["lon"])
 
         temperature = safe_float(
-            sea.get("temperature"),
-            28.0
+            sea.get("temperature"), 28.0
         )
 
         wave_height = safe_float(
-            sea.get("wave_height"),
-            1.0
+            sea.get("wave_height"), 1.0
         )
 
         wind_speed = safe_float(
-            sea.get("wind_speed"),
-            10.0
+            sea.get("wind_speed"), 10.0
         )
 
         # ----------------------------------------------------
-        # SEA LEVEL
+        # 3. SEA LEVEL
         # ----------------------------------------------------
-        sea_level = safe_float(
-            get_copernicus_sea_level(
-                coords["lat"],
-                coords["lon"]
-            ),
-            0.0
+        sea_level = get_copernicus_sea_level(
+            coords["lat"],
+            coords["lon"]
         )
 
         # ----------------------------------------------------
-        # SALINITY
+        # 4. SALINITY
         # ----------------------------------------------------
-        salinity = safe_float(
-            get_copernicus_salinity(
-                coords["lat"],
-                coords["lon"]
-            ),
-            35.0
+        salinity = get_copernicus_salinity(
+            coords["lat"],
+            coords["lon"]
         )
 
         # ----------------------------------------------------
-        # OCEAN CURRENT
+        # 5. OCEAN CURRENT
         # ----------------------------------------------------
         current = get_copernicus_current(
             coords["lat"],
             coords["lon"]
         )
 
-        current_velocity = safe_float(
-            current.get("velocity"),
-            0.0
+        current_velocity = (
+            current.get("velocity")
+            if current is not None
+            else None
         )
 
-        current_direction = safe_float(
-            current.get("direction"),
-            0.0
+        current_direction = (
+            current.get("direction")
+            if current is not None
+            else None
         )
 
         # ----------------------------------------------------
-        # RISK SCORE
+        # 6. RISK SCORE
         # ----------------------------------------------------
+        # Missing current data must not be reported as zero.
+        # Calculate a provisional score from available inputs
+        # and explicitly flag incomplete measurements.
+        risk_data_complete = current_velocity is not None
+
+        risk_current = (
+            current_velocity
+            if current_velocity is not None
+            else 0.0
+        )
+
         risk_score = calculate_risk(
             temperature,
-            current_velocity
+            risk_current
         )
 
         if risk_score < 30:
             risk_level = "Low"
             trend = "Improving"
-
         elif risk_score < 70:
             risk_level = "Medium"
             trend = "Stable"
-
         else:
             risk_level = "High"
             trend = "Worsening"
 
         # ----------------------------------------------------
-        # CRITICAL ZONES
+        # 7. CRITICAL ZONES
         # ----------------------------------------------------
         critical_zones = 0
 
         if wave_height > 2:
             critical_zones += 1
 
-        if current_velocity > 1.5:
+        if (
+            current_velocity is not None
+            and current_velocity > 1.5
+        ):
             critical_zones += 1
 
-        if sea_level > 0.5:
+        if sea_level is not None and sea_level > 0.5:
             critical_zones += 1
 
         if wind_speed > 20:
             critical_zones += 1
 
         # ----------------------------------------------------
-        # RISK FACTORS
+        # 8. RISK FACTORS
         # ----------------------------------------------------
         factors = [
-
             {
                 "title": "Temperature Anomalies",
-
-                "description":
-                    f"Current marine temperature is {temperature:.2f}°C",
-
-                "severity":
-                    "High" if temperature > 29 else "Medium",
-
-                "score":
-                    min(int((temperature / 35) * 100), 100)
+                "description": (
+                    f"Current marine temperature is "
+                    f"{temperature:.2f}°C"
+                ),
+                "severity": (
+                    "High" if temperature > 29 else "Medium"
+                ),
+                "score": min(
+                    max(int((temperature / 35) * 100), 0),
+                    100
+                )
             },
-
             {
                 "title": "Wave Turbulence",
-
-                "description":
-                    f"Wave height {wave_height:.2f} m",
-
-                "severity":
-                    "Critical" if wave_height > 2 else "Low",
-
-                "score":
-                    min(int(wave_height * 40), 100)
+                "description": f"Wave height {wave_height:.2f} m",
+                "severity": (
+                    "Critical" if wave_height > 2 else "Low"
+                ),
+                "score": min(
+                    max(int(wave_height * 40), 0),
+                    100
+                )
             },
-
             {
                 "title": "Wind Instability",
-
-                "description":
-                    f"Wind speed {wind_speed:.2f} km/h",
-
-                "severity":
-                    "High" if wind_speed > 20 else "Medium",
-
-                "score":
-                    min(int(wind_speed * 4), 100)
+                "description": f"Wind speed {wind_speed:.2f} km/h",
+                "severity": (
+                    "High" if wind_speed > 20 else "Medium"
+                ),
+                "score": min(
+                    max(int(wind_speed * 4), 0),
+                    100
+                )
             },
-
             {
                 "title": "Ocean Current Velocity",
-
-                "description":
-                    f"Current velocity {current_velocity:.2f} m/s",
-
-                "severity":
+                "description": (
+                    f"Current velocity {current_velocity:.2f} m/s"
+                    if current_velocity is not None
+                    else "Ocean current data unavailable"
+                ),
+                "severity": (
                     "Critical"
-                    if current_velocity > 1.5
-                    else "Low",
-
-                "score":
-                    90
-                    if current_velocity > 1.5
-                    else 40
+                    if current_velocity is not None
+                    and current_velocity > 1.5
+                    else "Low"
+                    if current_velocity is not None
+                    else "Unavailable"
+                ),
+                "score": (
+                    min(int(current_velocity / 1.5 * 100), 100)
+                    if current_velocity is not None
+                    else None
+                )
             },
-
             {
                 "title": "Sea Level Rise",
-
-                "description":
-                    f"Sea level {sea_level:.2f} m",
-
-                "severity":
-                    "High" if sea_level > 0.5 else "Low",
-
-                "score":
-                    min(int(sea_level * 100), 100)
+                "description": (
+                    f"Sea level {sea_level:.3f} m"
+                    if sea_level is not None
+                    else "Sea-level data unavailable"
+                ),
+                "severity": (
+                    "High"
+                    if sea_level is not None and sea_level > 0.5
+                    else "Low"
+                    if sea_level is not None
+                    else "Unavailable"
+                ),
+                "score": (
+                    min(max(int(sea_level * 100), 0), 100)
+                    if sea_level is not None
+                    else None
+                )
             }
         ]
 
         # ----------------------------------------------------
-        # ALERTS
+        # 9. ALERTS
         # ----------------------------------------------------
         alerts = []
 
         if wave_height > 2:
-
             alerts.append({
                 "type": "ALERT",
-
-                "message":
-                    f"High wave activity detected near {coords['name']}",
-
+                "message": (
+                    f"High wave activity detected near "
+                    f"{coords['name']}"
+                ),
                 "time": "Immediate"
             })
 
-        if current_velocity > 1.5:
-
+        if (
+            current_velocity is not None
+            and current_velocity > 1.5
+        ):
             alerts.append({
                 "type": "WARNING",
-
-                "message":
-                    f"Strong ocean current near {coords['name']}",
-
+                "message": (
+                    f"Strong ocean current near {coords['name']}"
+                ),
                 "time": "Next 24 hrs"
             })
 
         if wind_speed > 20:
-
             alerts.append({
                 "type": "ALERT",
-
-                "message":
-                    f"Strong marine winds near {coords['name']}",
-
+                "message": (
+                    f"Strong marine winds near {coords['name']}"
+                ),
                 "time": "Immediate"
             })
 
-        if sea_level > 0.5:
-
+        if sea_level is not None and sea_level > 0.5:
             alerts.append({
                 "type": "NOTICE",
-
-                "message":
-                    f"Elevated sea level near {coords['name']}",
-
+                "message": (
+                    f"Elevated sea level near {coords['name']}"
+                ),
                 "time": "Monitoring"
             })
 
-        # If there are no alerts
-        if not alerts:
+        if current_velocity is None or sea_level is None:
+            alerts.append({
+                "type": "DATA NOTICE",
+                "message": (
+                    "Some ocean measurements are unavailable. "
+                    "Risk assessment may be incomplete."
+                ),
+                "time": "Data unavailable"
+            })
 
+        if not alerts:
             alerts.append({
                 "type": "NOTICE",
-
-                "message":
-                    f"Marine conditions near {coords['name']} are stable",
-
-                "time": "Live"
+                "message": (
+                    f"Marine conditions near {coords['name']} "
+                    "show no threshold-based alerts."
+                ),
+                "time": "Latest available data"
             })
 
         # ----------------------------------------------------
-        # RESPONSE
+        # 10. RESPONSE
         # ----------------------------------------------------
         return {
-
             "status": "success",
-
             "location": location,
-
             "locationName": coords["name"],
-
             "coordinates": {
                 "lat": coords["lat"],
                 "lon": coords["lon"]
             },
-
             "riskScore": risk_score,
-
             "riskLevel": risk_level,
-
+            "riskDataComplete": risk_data_complete,
             "criticalZones": critical_zones,
-
             "trend": trend,
-
             "factors": factors,
-
             "alerts": alerts,
-
             "liveData": {
-
                 "temperature": temperature,
-
                 "waveHeight": wave_height,
-
                 "windSpeed": wind_speed,
-
                 "seaLevel": sea_level,
-
                 "salinity": salinity,
-
                 "currentVelocity": current_velocity,
-
                 "currentDirection": current_direction
             }
         }
 
-    # --------------------------------------------------------
-    # ERROR HANDLING
-    # --------------------------------------------------------
     except Exception as e:
-
-        print("Risk API Error:", e)
+        print("Risk API Error:", repr(e))
 
         return {
             "status": "error",

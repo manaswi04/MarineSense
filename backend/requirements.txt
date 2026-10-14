@@ -4,3 +4,7 @@ requests==2.32.4
 xarray==2025.7.1
 numpy==2.3.2
 reportlab==4.4.3
+pymongo
+bcrypt
+PyJWT
+python-dotenv

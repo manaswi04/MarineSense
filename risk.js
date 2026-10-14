@@ -1,15 +1,13 @@
 // =============================================
-// ⚠️ MarineSense Risk Engine
+// MarineSense Risk Engine
 // =============================================
+
+let riskRequestInProgress = false;
 
 document.addEventListener("DOMContentLoaded", () => {
 
-    // =============================================
-    // 🔹 GET SELECTED LOCATION
-    // =============================================
+    // Get selected port/location
     function getSelectedLocation() {
-
-        // Try common global variable
         if (
             typeof window.selectedLocation !== "undefined" &&
             window.selectedLocation
@@ -19,17 +17,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 .trim();
         }
 
-        // Try localStorage
         const storedLocation =
             localStorage.getItem("selectedLocation");
 
         if (storedLocation) {
-            return storedLocation
-                .toLowerCase()
-                .trim();
+            return storedLocation.toLowerCase().trim();
         }
 
-        // Try port selector
         const selectors = [
             "#port-select",
             "#location-select",
@@ -38,417 +32,232 @@ document.addEventListener("DOMContentLoaded", () => {
         ];
 
         for (const selector of selectors) {
+            const element = document.querySelector(selector);
 
-            const element =
-                document.querySelector(selector);
-
-            if (
-                element &&
-                element.value
-            ) {
-                return element.value
-                    .toLowerCase()
-                    .trim();
+            if (element && element.value) {
+                return element.value.toLowerCase().trim();
             }
         }
 
-        // Backend default
         return "mumbai";
     }
 
-
-    // =============================================
-    // 🔹 SAFE ELEMENT UPDATE
-    // =============================================
+    // Safely update text
     function setText(id, value) {
-
-        const element =
-            document.getElementById(id);
+        const element = document.getElementById(id);
 
         if (element) {
-            element.innerText =
-                value ?? "--";
+            element.innerText = value ?? "--";
         }
     }
 
-
-    // =============================================
-    // 🔹 SAFE WIDTH UPDATE
-    // =============================================
+    // Safely update progress bar
     function setWidth(id, value) {
+        const element = document.getElementById(id);
 
-        const element =
-            document.getElementById(id);
+        if (!element) return;
 
-        if (!element) {
-            return;
-        }
-
-        let width =
-            Number(value);
+        let width = Number(value);
 
         if (!Number.isFinite(width)) {
             width = 0;
         }
 
-        width =
-            Math.max(
-                0,
-                Math.min(100, width)
-            );
-
-        element.style.width =
-            `${width}%`;
+        width = Math.max(0, Math.min(100, width));
+        element.style.width = `${width}%`;
     }
 
-
-    // =============================================
-    // 🔹 LOAD RISK DATA
-    // =============================================
+    // Load risk data without overlapping requests
     async function loadRiskData() {
+        if (riskRequestInProgress) return;
+
+        riskRequestInProgress = true;
+
+        let riskTimeoutId;
 
         try {
-
-            const selectedLocation =
-                getSelectedLocation();
+            const selectedLocation = getSelectedLocation();
 
             console.log(
-                "⚠️ Risk selected location:",
+                "Risk selected location:",
                 selectedLocation
             );
 
-
-            // =============================================
-            // 🔹 API URL
-            // =============================================
             const apiUrl =
                 `http://127.0.0.1:8000/api/risk-analysis?location=${encodeURIComponent(
                     selectedLocation
                 )}`;
 
-            console.log(
-                "⚠️ Risk API URL:",
-                apiUrl
-            );
+            console.log("Risk API URL:", apiUrl);
 
+            // Abort a slow request after 30 seconds
+            const controller = new AbortController();
 
-            // =============================================
-            // 🔹 FETCH
-            // =============================================
-            const res =
-                await fetch(
-                    apiUrl,
-                    {
-                        cache: "no-store"
-                    }
-                );
+            riskTimeoutId = setTimeout(() => {
+                controller.abort();
+            }, 30000);
 
+            const res = await fetch(apiUrl, {
+                cache: "no-store",
+                signal: controller.signal
+            });
 
             if (!res.ok) {
-
                 throw new Error(
                     `Risk API returned ${res.status}`
                 );
             }
 
+            const risk = await res.json();
 
-            const risk =
-                await res.json();
+            console.log("Risk API response:", risk);
 
-
-            console.log(
-                "⚠️ Risk API response:",
-                risk
-            );
-
-
-            if (
-                !risk ||
-                risk.status === "error"
-            ) {
-
+            if (!risk || risk.status === "error") {
                 throw new Error(
                     risk?.message ||
                     "Risk analysis data missing"
                 );
             }
 
+            // Location
+            setText("risk-location", risk.locationName);
 
-            // =============================================
-            // 🔹 LOCATION
-            // =============================================
-            setText(
-                "risk-location",
-                risk.locationName
-            );
+            // Top metrics
+            setText("critical-zones", risk.criticalZones ?? 0);
 
+            const alerts = Array.isArray(risk.alerts)
+                ? risk.alerts
+                : [];
 
-            // =============================================
-            // 🔹 TOP METRICS
-            // =============================================
+            const highRiskEvents = alerts.filter(
+                alert =>
+                    alert.type === "ALERT" ||
+                    alert.type === "WARNING"
+            ).length;
 
-            setText(
-                "critical-zones",
+            setText("high-risk-events", highRiskEvents);
+            setText("risk-score-avg", risk.riskScore ?? 0);
+            setText("risk-trend", risk.trend ?? "--");
+            setText("risk-level", risk.riskLevel ?? "--");
+
+            // Progress bars
+            const criticalZones = Number(
                 risk.criticalZones ?? 0
             );
 
+            setWidth("critical-bar", criticalZones * 30);
+            setWidth("events-bar", highRiskEvents * 25);
+            setWidth("risk-score-bar", risk.riskScore ?? 0);
 
-            /*
-             * Your backend currently does NOT return
-             * highRiskEvents.
-             *
-             * Calculate it from alerts instead.
-             */
-
-            const alerts =
-                Array.isArray(risk.alerts)
-                    ? risk.alerts
-                    : [];
-
-            const highRiskEvents =
-                alerts.filter(
-                    alert =>
-                        alert.type === "ALERT" ||
-                        alert.type === "WARNING"
-                ).length;
-
-
-            setText(
-                "high-risk-events",
-                highRiskEvents
-            );
-
-
-            setText(
-                "risk-score-avg",
-                risk.riskScore ?? 0
-            );
-
-
-            setText(
-                "risk-trend",
-                risk.trend ?? "--"
-            );
-
-
-            // =============================================
-            // 🔹 RISK LEVEL
-            // =============================================
-            setText(
-                "risk-level",
-                risk.riskLevel ?? "--"
-            );
-
-
-            // =============================================
-            // 🔹 PROGRESS BARS
-            // =============================================
-
-            const criticalZones =
-                Number(
-                    risk.criticalZones ?? 0
-                );
-
-            setWidth(
-                "critical-bar",
-                criticalZones * 30
-            );
-
-
-            setWidth(
-                "events-bar",
-                highRiskEvents * 25
-            );
-
-
-            setWidth(
-                "risk-score-bar",
-                risk.riskScore ?? 0
-            );
-
-
-            // =============================================
-            // 🔹 RISK FACTORS
-            // =============================================
+            // Risk factors
             const factorsContainer =
-                document.getElementById(
-                    "risk-factors"
-                );
-
+                document.getElementById("risk-factors");
 
             if (factorsContainer) {
-
                 factorsContainer.innerHTML = "";
 
-
-                const factors =
-                    Array.isArray(risk.factors)
-                        ? risk.factors
-                        : [];
-
+                const factors = Array.isArray(risk.factors)
+                    ? risk.factors
+                    : [];
 
                 if (factors.length === 0) {
-
                     factorsContainer.innerHTML = `
                         <div class="p-4 text-gray-400">
                             No risk factors available.
                         </div>
                     `;
-
                 } else {
+                    factors.forEach(factor => {
+                        let color = "yellow";
 
-                    factors.forEach(
-                        factor => {
+                        if (factor.severity === "Critical") {
+                            color = "red";
+                        } else if (factor.severity === "High") {
+                            color = "orange";
+                        } else if (factor.severity === "Low") {
+                            color = "emerald";
+                        }
 
-                            let color =
-                                "yellow";
+                        const description =
+                            factor.description ??
+                            factor.desc ??
+                            "";
 
+                        const score = Number(
+                            factor.score ??
+                            factor.value ??
+                            0
+                        );
 
-                            if (
-                                factor.severity ===
-                                "Critical"
-                            ) {
-                                color = "red";
-                            }
+                        const safeScore = Math.max(
+                            0,
+                            Math.min(100, score)
+                        );
 
+                        factorsContainer.innerHTML += `
+                            <div class="
+                                flex items-center
+                                justify-between
+                                p-3
+                                bg-white/5
+                                rounded-lg
+                                mb-2
+                            ">
+                                <div class="flex-1">
+                                    <p class="
+                                        text-sm
+                                        text-gray-300
+                                    ">
+                                        ${factor.title ?? "Risk Factor"}
+                                    </p>
 
-                            else if (
-                                factor.severity ===
-                                "High"
-                            ) {
-                                color = "orange";
-                            }
+                                    <p class="
+                                        text-xs
+                                        text-gray-400
+                                        mt-1
+                                    ">
+                                        ${description}
+                                    </p>
+                                </div>
 
-
-                            else if (
-                                factor.severity ===
-                                "Low"
-                            ) {
-                                color = "emerald";
-                            }
-
-
-                            /*
-                             * Backend fields:
-                             *
-                             * title
-                             * description
-                             * severity
-                             * score
-                             */
-
-                            const description =
-                                factor.description ??
-                                factor.desc ??
-                                "";
-
-
-                            const score =
-                                Number(
-                                    factor.score ??
-                                    factor.value ??
-                                    0
-                                );
-
-
-                            factorsContainer.innerHTML += `
-
-                                <div class="
-                                    flex items-center
-                                    justify-between
-                                    p-3
-                                    bg-white/5
-                                    rounded-lg
-                                    mb-2
-                                ">
-
-                                    <div class="flex-1">
-
-                                        <p class="
-                                            text-sm
-                                            text-gray-300
-                                        ">
-                                            ${factor.title ?? "Risk Factor"}
-                                        </p>
-
-                                        <p class="
-                                            text-xs
-                                            text-gray-500
-                                            mt-1
-                                        ">
-                                            ${description}
-                                        </p>
-
-                                    </div>
-
+                                <div class="text-right ml-4">
+                                    <p class="
+                                        text-sm
+                                        font-semibold
+                                        text-${color}-400
+                                    ">
+                                        ${factor.severity ?? "--"}
+                                    </p>
 
                                     <div class="
-                                        text-right
-                                        ml-4
+                                        w-16 h-1
+                                        bg-white/10
+                                        rounded-full mt-1
                                     ">
-
-                                        <p class="
-                                            text-sm
-                                            font-semibold
-                                            text-${color}-400
-                                        ">
-                                            ${factor.severity ?? "--"}
-                                        </p>
-
-
-                                        <div class="
-                                            w-16
-                                            h-1
-                                            bg-white/10
-                                            rounded-full
-                                            mt-1
-                                        ">
-
-                                            <div
-                                                class="
-                                                    h-full
-                                                    bg-${color}-500
-                                                    rounded-full
-                                                "
-                                                style="
-                                                    width:${Math.max(
-                                                        0,
-                                                        Math.min(
-                                                            100,
-                                                            score
-                                                        )
-                                                    )}%;
-                                                "
-                                            ></div>
-
-                                        </div>
-
+                                        <div
+                                            class="
+                                                h-full
+                                                bg-${color}-500
+                                                rounded-full
+                                            "
+                                            style="width:${safeScore}%"
+                                        ></div>
                                     </div>
-
                                 </div>
-                            `;
-                        }
-                    );
+                            </div>
+                        `;
+                    });
                 }
             }
 
-
-            // =============================================
-            // 🔹 ALERTS
-            // =============================================
+                        // Alerts
             const alertsContainer =
-                document.getElementById(
-                    "risk-alerts"
-                );
-
+                document.getElementById("risk-alerts");
 
             if (alertsContainer) {
-
                 alertsContainer.innerHTML = "";
 
-
                 if (alerts.length === 0) {
-
                     alertsContainer.innerHTML = `
                         <div class="
                             p-3
@@ -459,91 +268,58 @@ document.addEventListener("DOMContentLoaded", () => {
                             No active alerts.
                         </div>
                     `;
-
                 } else {
+                    alerts.forEach(alert => {
+                        let color = "cyan";
 
-                    alerts.forEach(
-                        alert => {
-
-                            let color =
-                                "cyan";
-
-
-                            if (
-                                alert.type ===
-                                "ALERT"
-                            ) {
-                                color = "red";
-                            }
-
-
-                            else if (
-                                alert.type ===
-                                "WARNING"
-                            ) {
-                                color = "yellow";
-                            }
-
-
-                            else if (
-                                alert.type ===
-                                "NOTICE"
-                            ) {
-                                color = "cyan";
-                            }
-
-
-                            alertsContainer.innerHTML += `
-
-                                <div class="
-                                    p-3
-                                    border-l-4
-                                    border-${color}-500
-                                    bg-${color}-500/10
-                                    rounded
-                                    mb-2
-                                ">
-
-                                    <p class="
-                                        text-xs
-                                        text-${color}-400
-                                        font-semibold
-                                    ">
-                                        ${alert.type ?? "NOTICE"}
-                                    </p>
-
-
-                                    <p class="
-                                        text-sm
-                                        text-gray-300
-                                        mt-1
-                                    ">
-                                        ${alert.message ?? ""}
-                                    </p>
-
-
-                                    <p class="
-                                        text-xs
-                                        text-gray-500
-                                        mt-1
-                                    ">
-                                        ${alert.time ?? ""}
-                                    </p>
-
-                                </div>
-                            `;
+                        if (alert.type === "ALERT") {
+                            color = "red";
+                        } else if (alert.type === "WARNING") {
+                            color = "yellow";
+                        } else if (alert.type === "NOTICE") {
+                            color = "cyan";
                         }
-                    );
+
+                        alertsContainer.innerHTML += `
+                            <div class="
+                                p-3
+                                border-l-4
+                                border-${color}-500
+                                bg-${color}-500/10
+                                rounded
+                                mb-2
+                            ">
+                                <p class="
+                                    text-xs
+                                    text-${color}-400
+                                    font-semibold
+                                ">
+                                    ${alert.type ?? "NOTICE"}
+                                </p>
+
+                                <p class="
+                                    text-sm
+                                    text-gray-300
+                                    mt-1
+                                ">
+                                    ${alert.message ?? ""}
+                                </p>
+
+                                <p class="
+                                    text-xs
+                                    text-gray-500
+                                    mt-1
+                                ">
+                                    ${alert.time ?? ""}
+                                </p>
+                            </div>
+                        `;
+                    });
                 }
             }
 
-
-            // =============================================
-            // 🔹 LIVE MARINE DATA
-            // =============================================
-            const live =
-                risk.liveData || {};
-
+            // Live marine data
+            const live = risk.liveData || {};
 
             setText(
                 "risk-temperature",
@@ -552,14 +328,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     : "--"
             );
 
-
             setText(
                 "risk-wave",
                 live.waveHeight !== undefined
                     ? `${Number(live.waveHeight).toFixed(2)} m`
                     : "--"
             );
-
 
             setText(
                 "risk-wind",
@@ -568,14 +342,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     : "--"
             );
 
-
             setText(
                 "risk-sea-level",
                 live.seaLevel !== undefined
                     ? `${Number(live.seaLevel).toFixed(2)} m`
                     : "--"
             );
-
 
             setText(
                 "risk-salinity",
@@ -584,14 +356,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     : "--"
             );
 
-
             setText(
                 "risk-current",
                 live.currentVelocity !== undefined
                     ? `${Number(live.currentVelocity).toFixed(2)} m/s`
                     : "--"
             );
-
 
             setText(
                 "risk-current-direction",
@@ -600,75 +370,54 @@ document.addEventListener("DOMContentLoaded", () => {
                     : "--"
             );
 
-
             console.log(
-                "✅ Risk dashboard updated for:",
+                "Risk dashboard updated for:",
                 risk.locationName
             );
 
-
-        } catch (error) {
-
-            console.error(
-                "❌ Risk Error:",
-                error
-            );
-
-
-            // Do NOT destroy existing dashboard
-            // just show an error if the element exists.
-
+            // Hide an earlier error after a successful request
             const errorElement =
-                document.getElementById(
-                    "risk-error"
-                );
-
+                document.getElementById("risk-error");
 
             if (errorElement) {
-
-                errorElement.innerText =
-                    "Unable to load risk data";
-
-                errorElement.classList.remove(
-                    "hidden"
-                );
+                errorElement.classList.add("hidden");
+                errorElement.innerText = "";
             }
+
+        } catch (error) {
+            console.error("Risk Error:", error);
+
+            const errorElement =
+                document.getElementById("risk-error");
+
+            if (errorElement) {
+                errorElement.innerText =
+                    error.name === "AbortError"
+                        ? "Risk data request timed out. Please try again."
+                        : "Unable to load risk data";
+
+                errorElement.classList.remove("hidden");
+            }
+
+        } finally {
+            clearTimeout(riskTimeoutId);
+            riskRequestInProgress = false;
         }
     }
 
-
-    // =============================================
-    // 🔹 INITIAL LOAD
-    // =============================================
+    // Initial load
     loadRiskData();
 
+    // Refresh every 60 seconds
+    setInterval(loadRiskData, 60000);
 
-    // =============================================
-    // 🔹 AUTO REFRESH
-    // =============================================
-    setInterval(
-        loadRiskData,
-        60000
-    );
+    // Refresh when another part of the dashboard changes port
+    document.addEventListener("portChanged", () => {
+        console.log("Port changed - refreshing risk data");
+        loadRiskData();
+    });
 
-
-    // =============================================
-    // 🔹 REFRESH WHEN PORT CHANGES
-    // =============================================
-    document.addEventListener(
-        "portChanged",
-        () => {
-
-            console.log(
-                "🔄 Port changed - refreshing risk data"
-            );
-
-            loadRiskData();
-        }
-    );
-
-
-    // Also listen for common select changes
+    // Listen for location selector changes
     const possibleSelectors = [
         "#port-select",
         "#location-select",
@@ -676,40 +425,25 @@ document.addEventListener("DOMContentLoaded", () => {
         "#locationSelector"
     ];
 
+    possibleSelectors.forEach(selector => {
+        const element = document.querySelector(selector);
 
-    possibleSelectors.forEach(
-        selector => {
+        if (element) {
+            element.addEventListener("change", () => {
+                const location = element.value
+                    .toLowerCase()
+                    .trim();
 
-            const element =
-                document.querySelector(
-                    selector
+                window.selectedLocation = location;
+
+                localStorage.setItem(
+                    "selectedLocation",
+                    location
                 );
 
-
-            if (element) {
-
-                element.addEventListener(
-                    "change",
-                    () => {
-
-                        const location =
-                            element.value
-                                .toLowerCase()
-                                .trim();
-
-                        window.selectedLocation =
-                            location;
-
-                        localStorage.setItem(
-                            "selectedLocation",
-                            location
-                        );
-
-                        loadRiskData();
-                    }
-                );
-            }
+                loadRiskData();
+            });
         }
-    );
+    });
 
 });

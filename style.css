@@ -109,3 +109,125 @@ select option:hover {
   background-color: #06b6d4;
   color: white;
 }
+
+
+/* =========================================
+   MarineSense - Dashboard Layout Repair
+   ========================================= */
+
+/* Prevent flex children from forcing overflow */
+html,
+body {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+body > div,
+.flex.h-screen {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Keep sidebar fixed and content flexible */
+aside {
+  flex: 0 0 256px;
+  min-width: 256px;
+}
+
+.flex-1 {
+  min-width: 0;
+}
+
+/* Header controls must fit available width */
+header {
+  min-width: 0;
+  max-width: 100%;
+}
+
+header > div {
+  min-width: 0;
+}
+
+header input {
+  max-width: 100%;
+}
+
+/* Main content uses the full available width */
+main {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.page-content {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Allow dashboard cards and charts to shrink correctly */
+#dashboard-page .grid {
+  width: 100%;
+  min-width: 0;
+}
+
+#dashboard-page .grid > * {
+  min-width: 0;
+}
+
+#dashboard-page canvas {
+  max-width: 100%;
+}
+
+/* Keep charts contained within their cards */
+#dashboard-page .glass-effect {
+  min-width: 0;
+}
+
+#dashboard-page .h-56 {
+  position: relative;
+  width: 100%;
+}
+
+/* Responsive header and dashboard */
+@media (max-width: 1100px) {
+  header {
+    flex-wrap: wrap;
+  }
+
+  header > div {
+    flex-wrap: wrap;
+  }
+
+  #dashboard-page .grid-cols-5 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #dashboard-page .lg\:grid-cols-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  aside {
+    flex-basis: 190px;
+    min-width: 190px;
+  }
+
+  main {
+    padding: 1rem;
+  }
+
+  #dashboard-page .grid-cols-5,
+  #dashboard-page .lg\:grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

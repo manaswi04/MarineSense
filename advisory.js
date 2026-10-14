@@ -1,441 +1,318 @@
 // =============================================
-// 📢 Marine Advisory Engine
+// MarineSense — Marine Advisory Engine
 // =============================================
 
 document.addEventListener("DOMContentLoaded", () => {
+    const API_BASE = "http://127.0.0.1:8000";
+    const REFRESH_INTERVAL = 60000;
+    const REQUEST_TIMEOUT = 30000;
+
+    let requestInProgress = false;
+    let refreshTimer = null;
+    let activeController = null;
+
+    // ---------------------------------------------
+    // HELPERS
+    // ---------------------------------------------
+
+    function getSelectedLocation() {
+        const selected =
+            window.selectedLocation ||
+            localStorage.getItem("selectedLocation") ||
+            "mumbai";
+
+        return String(selected).toLowerCase().trim();
+    }
+
+    function formatValue(value, decimals = 2, unit = "") {
+        if (
+            value === null ||
+            value === undefined ||
+            value === "" ||
+            !Number.isFinite(Number(value))
+        ) {
+            return "--";
+        }
+
+        return `${Number(value).toFixed(decimals)}${unit ? " " + unit : ""}`;
+    }
+
+    function setText(id, value) {
+        const element = document.getElementById(id);
+        if (element) element.textContent = value;
+    }
+
+    function showError(message) {
+        const container = document.getElementById("advisory-cards");
+        if (!container) return;
+
+        container.replaceChildren();
+
+        const card = document.createElement("div");
+        card.className =
+            "glass-effect rounded-2xl p-6 border border-red-500/30";
+
+        const heading = document.createElement("h3");
+        heading.className = "text-xl font-bold text-red-400 mb-2";
+        heading.textContent = "Unable to load advisory data";
+
+        const detail = document.createElement("p");
+        detail.className = "text-gray-300";
+        detail.textContent = message;
+
+        card.append(heading, detail);
+        container.appendChild(card);
+    }
+
+    // ---------------------------------------------
+    // ADVISORY CARD RENDERING
+    // ---------------------------------------------
+
+    function renderAdvisories(advisories) {
+        const container = document.getElementById("advisory-cards");
+        if (!container) return;
+
+        container.replaceChildren();
+
+        if (!Array.isArray(advisories) || advisories.length === 0) {
+            const card = document.createElement("div");
+            card.className =
+                "glass-effect rounded-2xl p-6 border border-cyan-500/20";
+
+            const heading = document.createElement("h3");
+            heading.className = "text-xl font-bold text-white mb-2";
+            heading.textContent = "No Advisory Messages";
+
+            const message = document.createElement("p");
+            message.className = "text-gray-300";
+            message.textContent =
+                "No advisory messages were returned. Check data availability before assuming conditions are stable.";
+
+            card.append(heading, message);
+            container.appendChild(card);
+            return;
+        }
+
+        advisories.forEach((advisory) => {
+            const severity = String(advisory.severity || "Unknown");
+
+            let color = "cyan";
+            if (severity === "Critical") color = "orange";
+            else if (severity === "High") color = "red";
+            else if (severity === "Medium") color = "amber";
+            else if (severity === "Low") color = "emerald";
+
+            const card = document.createElement("div");
+            card.className =
+                `glass-effect rounded-2xl p-6 border border-${color}-500/20`;
+
+            const header = document.createElement("div");
+            header.className =
+                "flex justify-between items-start mb-4 gap-3";
+
+            const titleGroup = document.createElement("div");
+
+            const type = document.createElement("p");
+            type.className =
+                `text-xs uppercase text-${color}-400 mb-2`;
+            type.textContent = advisory.type || "Marine Advisory";
+
+            const title = document.createElement("h3");
+            title.className = "text-xl font-bold text-white";
+            title.textContent = advisory.title || "Marine Condition";
+
+            titleGroup.append(type, title);
+
+            const badge = document.createElement("span");
+            badge.className =
+                `px-3 py-1 rounded-full bg-${color}-500/20 text-${color}-400 text-xs`;
+            badge.textContent = severity;
+
+            header.append(titleGroup, badge);
+
+            const message = document.createElement("p");
+            message.className = "text-gray-300 mb-4";
+            message.textContent = advisory.message || "";
+
+            const recommendationBox = document.createElement("div");
+            recommendationBox.className =
+                "p-3 rounded-xl bg-white/5";
+
+            const recommendationLabel = document.createElement("p");
+            recommendationLabel.className =
+                "text-xs text-gray-500 mb-1";
+            recommendationLabel.textContent = "Recommendation";
+
+            const recommendation = document.createElement("p");
+            recommendation.className = "text-sm text-cyan-300";
+            recommendation.textContent =
+                advisory.recommendation || "Continue monitoring available data.";
+
+            recommendationBox.append(
+                recommendationLabel,
+                recommendation
+            );
+
+            card.append(header, message, recommendationBox);
+            container.appendChild(card);
+        });
+    }
+
+    // ---------------------------------------------
+    // LOAD ADVISORY DATA
+    // ---------------------------------------------
 
     async function loadAdvisories() {
+        if (requestInProgress) return;
+
+        requestInProgress = true;
+        activeController = new AbortController();
+
+        const timeoutId = setTimeout(
+            () => activeController?.abort(),
+            REQUEST_TIMEOUT
+        );
 
         try {
+            const selectedLocation = getSelectedLocation();
 
-            // =============================================
-            // GET SELECTED LOCATION
-            // =============================================
-
-            let selectedLocation =
-                localStorage.getItem("selectedLocation") || "mumbai";
-
-            selectedLocation =
-                selectedLocation.toLowerCase().trim();
-
-            console.log(
-                "📍 Advisory selected location:",
-                selectedLocation
-            );
-
-            // =============================================
-            // API URL
-            // IMPORTANT: BACKTICKS ARE REQUIRED
-            // =============================================
+            console.log("Advisory selected location:", selectedLocation);
 
             const apiUrl =
-                `http://127.0.0.1:8000/api/advisory?location=${encodeURIComponent(selectedLocation)}`;
+                `${API_BASE}/api/advisory?location=${encodeURIComponent(selectedLocation)}`;
 
-            console.log(
-                "📡 Advisory API URL:",
-                apiUrl
-            );
-
-            const res = await fetch(apiUrl, {
-                cache: "no-store"
+            const response = await fetch(apiUrl, {
+                cache: "no-store",
+                signal: activeController.signal
             });
 
-            if (!res.ok) {
-
-                throw new Error(
-                    `Advisory API returned ${res.status}`
-                );
+            if (!response.ok) {
+                throw new Error(`Advisory API returned ${response.status}`);
             }
 
-            const data = await res.json();
+            const data = await response.json();
 
-            console.log(
-                "📢 Advisory API response:",
-                data
-            );
-
-            // =============================================
-            // CHECK API STATUS
-            // =============================================
+            console.log("Advisory API response:", data);
 
             if (data.status !== "success") {
-
-                throw new Error(
-                    data.message || "Advisory API failed"
-                );
+                throw new Error(data.message || "Advisory API failed");
             }
 
-            // =============================================
-            // SUMMARY
-            // =============================================
+            const summary = data.summary || {};
 
-            const summary =
-                data.summary || {};
+            // Risk score
+            setText(
+                "adv-risk-score",
+                formatValue(summary.riskScore, 0)
+            );
 
-            // =============================================
-            // RISK SCORE
-            // =============================================
+            // Wave height
+            setText(
+                "adv-wave",
+                formatValue(summary.waveHeight, 2, "m")
+            );
 
-            const riskScoreElement =
-                document.getElementById("adv-risk-score");
+            // Oxygen is not supplied by the current API.
+            setText("adv-oxygen", "--");
 
-            if (riskScoreElement) {
+            // Temperature
+            setText(
+                "adv-temp",
+                formatValue(summary.temperature, 2, "°C")
+            );
 
-                riskScoreElement.innerText =
-                    summary.riskScore ?? "--";
-            }
+            // Sea level
+            setText(
+                "adv-sea",
+                formatValue(summary.seaLevel, 2, "m")
+            );
 
-            // =============================================
-            // WAVE HEIGHT
-            // =============================================
+            // Current velocity
+            setText(
+                "adv-current",
+                formatValue(summary.currentVelocity, 2, "m/s")
+            );
 
-            const waveElement =
-                document.getElementById("adv-wave");
+            // Salinity
+            setText(
+                "adv-salinity",
+                formatValue(summary.salinity, 2, "PSU")
+            );
 
-            if (waveElement) {
+            // Selected port
+            setText(
+                "adv-location",
+                data.locationName || selectedLocation
+            );
 
-                waveElement.innerText =
-                    `${Number(summary.waveHeight ?? 0).toFixed(2)} m`;
-            }
+            // Render advisory cards
+            renderAdvisories(data.advisories);
 
-            // =============================================
-            // OXYGEN
-            // =============================================
-            // Your current API DOES NOT return oxygen.
-            // Therefore do NOT call .toFixed() on summary.oxygen.
-
-            const oxygenElement =
-                document.getElementById("adv-oxygen");
-
-            if (oxygenElement) {
-
-                oxygenElement.innerText =
-                    "--";
-            }
-
-            // =============================================
-            // TEMPERATURE
-            // =============================================
-
-            const tempElement =
-                document.getElementById("adv-temp");
-
-            if (tempElement) {
-
-                tempElement.innerText =
-                    `${Number(summary.temperature ?? 0).toFixed(2)} °C`;
-            }
-
-            // =============================================
-            // SEA LEVEL
-            // =============================================
-
-            const seaElement =
-                document.getElementById("adv-sea");
-
-            if (seaElement) {
-
-                seaElement.innerText =
-                    `${Number(summary.seaLevel ?? 0).toFixed(2)} m`;
-            }
-
-            // =============================================
-            // CURRENT VELOCITY
-            // =============================================
-
-            const currentElement =
-                document.getElementById("adv-current");
-
-            if (currentElement) {
-
-                currentElement.innerText =
-                    `${Number(summary.currentVelocity ?? 0).toFixed(2)} m/s`;
-            }
-
-            // =============================================
-            // SALINITY
-            // =============================================
-
-            const salinityElement =
-                document.getElementById("adv-salinity");
-
-            if (salinityElement) {
-
-                salinityElement.innerText =
-                    `${Number(summary.salinity ?? 0).toFixed(2)} PSU`;
-            }
-
-            // =============================================
-            // LOCATION NAME
-            // =============================================
-
-            const locationElement =
-                document.getElementById("adv-location");
-
-            if (locationElement) {
-
-                locationElement.innerText =
-                    data.locationName || selectedLocation;
-            }
-
-            // =============================================
-            // ADVISORY CARDS
-            // =============================================
-
-            const container =
-                document.getElementById("advisory-cards");
-
-            if (!container) {
-
+            // Log data completeness
+            if (data.dataComplete === false) {
                 console.warn(
-                    "⚠️ advisory-cards element not found"
+                    "Some marine measurements are unavailable:",
+                    data.missingData || []
                 );
-
-            } else {
-
-                container.innerHTML = "";
-
-                const advisories =
-                    Array.isArray(data.advisories)
-                        ? data.advisories
-                        : [];
-
-                // =============================================
-                // NO ADVISORIES
-                // =============================================
-
-                if (advisories.length === 0) {
-
-                    container.innerHTML = `
-                        <div class="
-                            glass-effect
-                            rounded-2xl
-                            p-6
-                            border
-                            border-cyan-500/20
-                        ">
-
-                            <h3 class="
-                                text-xl
-                                font-bold
-                                text-white
-                                mb-2
-                            ">
-                                No Active Advisories
-                            </h3>
-
-                            <p class="text-gray-300">
-                                Marine conditions are currently
-                                stable.
-                            </p>
-
-                        </div>
-                    `;
-
-                } else {
-
-                    // =============================================
-                    // RENDER ADVISORIES
-                    // =============================================
-
-                    advisories.forEach(advisory => {
-
-                        let color = "cyan";
-
-                        if (
-                            advisory.severity === "High"
-                        ) {
-                            color = "red";
-                        }
-
-                        if (
-                            advisory.severity === "Critical"
-                        ) {
-                            color = "orange";
-                        }
-
-                        if (
-                            advisory.severity === "Low"
-                        ) {
-                            color = "emerald";
-                        }
-
-                        container.innerHTML += `
-
-                            <div class="
-                                glass-effect
-                                rounded-2xl
-                                p-6
-                                border
-                                border-${color}-500/20
-                            ">
-
-                                <div class="
-                                    flex
-                                    justify-between
-                                    items-start
-                                    mb-4
-                                ">
-
-                                    <div>
-
-                                        <p class="
-                                            text-xs
-                                            uppercase
-                                            text-${color}-400
-                                            mb-2
-                                        ">
-                                            ${advisory.type || "Marine Advisory"}
-                                        </p>
-
-                                        <h3 class="
-                                            text-xl
-                                            font-bold
-                                            text-white
-                                        ">
-                                            ${advisory.title || "Marine Condition"}
-                                        </h3>
-
-                                    </div>
-
-                                    <span class="
-                                        px-3
-                                        py-1
-                                        rounded-full
-                                        bg-${color}-500/20
-                                        text-${color}-400
-                                        text-xs
-                                    ">
-                                        ${advisory.severity || "Low"}
-                                    </span>
-
-                                </div>
-
-                                <p class="
-                                    text-gray-300
-                                    mb-4
-                                ">
-                                    ${advisory.message || ""}
-                                </p>
-
-                                <div class="
-                                    p-3
-                                    rounded-xl
-                                    bg-white/5
-                                ">
-
-                                    <p class="
-                                        text-xs
-                                        text-gray-500
-                                        mb-1
-                                    ">
-                                        Recommendation
-                                    </p>
-
-                                    <p class="
-                                        text-sm
-                                        text-cyan-300
-                                    ">
-                                        ${advisory.recommendation || ""}
-                                    </p>
-
-                                </div>
-
-                            </div>
-                        `;
-                    });
-                }
             }
 
             console.log(
-                "✅ Advisory dashboard updated for:",
-                data.locationName
+                "Advisory dashboard updated for:",
+                data.locationName || selectedLocation
             );
 
         } catch (error) {
+            console.error("Advisory error:", error);
 
-            console.error(
-                "❌ Advisory Error:",
-                error
-            );
-
-            // =============================================
-            // SHOW ERROR ON SCREEN
-            // =============================================
-
-            const container =
-                document.getElementById("advisory-cards");
-
-            if (container) {
-
-                container.innerHTML = `
-                    <div class="
-                        glass-effect
-                        rounded-2xl
-                        p-6
-                        border
-                        border-red-500/30
-                    ">
-
-                        <h3 class="
-                            text-xl
-                            font-bold
-                            text-red-400
-                            mb-2
-                        ">
-                            Unable to load live data
-                        </h3>
-
-                        <p class="text-gray-300">
-                            ${error.message}
-                        </p>
-
-                    </div>
-                `;
+            if (error.name === "AbortError") {
+                showError(
+                    "The request timed out. Check that the backend is running and retry."
+                );
+            } else {
+                showError(error.message || "An unexpected error occurred.");
             }
+        } finally {
+            clearTimeout(timeoutId);
+            activeController = null;
+            requestInProgress = false;
         }
     }
 
-    // =============================================
-    // INITIAL LOAD
-    // =============================================
+    // ---------------------------------------------
+    // INITIAL LOAD AND AUTO REFRESH
+    // ---------------------------------------------
 
     loadAdvisories();
 
-    // =============================================
-    // AUTO REFRESH
-    // =============================================
-
-    setInterval(
+    refreshTimer = setInterval(
         loadAdvisories,
-        60000
+        REFRESH_INTERVAL
     );
-});
 
+    // Respond to the port selector if it dispatches this event.
+    window.addEventListener("portChanged", () => {
+        if (activeController) {
+            activeController.abort();
+        }
 
-// =============================================
-// 🔹 DOWNLOAD REPORT
-// =============================================
+        // Let the active request finish its cleanup first.
+        setTimeout(loadAdvisories, 50);
+    });
 
-document.addEventListener("DOMContentLoaded", () => {
+    // ---------------------------------------------
+    // DOWNLOAD PDF REPORT
+    // ---------------------------------------------
 
-    const downloadBtn =
-        document.getElementById(
-            "download-report-btn"
-        );
+    const downloadButton =
+        document.getElementById("download-report-btn");
 
-    if (downloadBtn) {
-
-        downloadBtn.addEventListener(
-            "click",
-            () => {
-
-                window.open(
-                    "http://127.0.0.1:8000/api/download-report",
-                    "_blank"
-                );
-
-            }
-        );
+    if (downloadButton) {
+        downloadButton.addEventListener("click", () => {
+            window.open(
+                `${API_BASE}/api/download-report`,
+                "_blank",
+                "noopener"
+            );
+        });
     }
 });
